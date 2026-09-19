@@ -19,7 +19,7 @@ export function normalizeLatexSource(source: string): string {
   return source.replace(/\\+/g, (run, offset: number) => {
     if (run.length >= 4 && run.length % 2 === 0) return "\\".repeat(run.length / 2)
     const next = source[offset + run.length]
-    const looksLikeEscapedCommand = next !== undefined && !/\s|&|\\/.test(next)
+    const looksLikeEscapedCommand = next !== undefined && !/\s|&|\\|\[/.test(next)
     return run.length === 2 && looksLikeEscapedCommand ? "\\" : run
   })
 }
@@ -30,8 +30,8 @@ export default Plugin.define({
     const color = typeof context.options.color === "string"
       ? context.options.color
       : context.themeMode === "light" ? "#24292f" : "#d4d4d4"
-    const fontSize = positiveNumber(context.options.fontSize, 20)
-    const pixelRatio = positiveNumber(context.options.pixelRatio, 1)
+    const fontSize = positiveNumber(context.options.fontSize, 16)
+    const pixelRatio = positiveNumber(context.options.pixelRatio, 2)
     const mode = graphicsMode(context.options.graphicsMode)
 
     return context.markdown.registerCodeBlockRenderer(LANGUAGE, (token, render) => {

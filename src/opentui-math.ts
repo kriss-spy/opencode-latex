@@ -70,8 +70,8 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     super(ctx, options)
     this.graphicsContext = ctx
     this.graphicsMode = options.graphicsMode ?? "auto"
-    this.fontSize = positiveNumber(options.fontSize, 20)
-    this.pixelRatio = positiveNumber(options.pixelRatio, 1)
+    this.fontSize = positiveNumber(options.fontSize, 16)
+    this.pixelRatio = positiveNumber(options.pixelRatio, 2)
     this.graphicsParseOptions = {
       ...(options.macros ? { macros: options.macros } : {}),
       ...(options.maxExpand !== undefined ? { maxExpand: options.maxExpand } : {}),
@@ -241,6 +241,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   private readonly handleCapabilities = (): void => {
     this.graphicsImage.protocol = this.requestedImageProtocol()
     this.scheduleRaster()
+    this.updateImageCellSize()
     this.yogaNode.markDirty()
     this.requestRender()
   }
@@ -258,6 +259,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     if (this.canUseGraphics()) {
       if (!this.image && !this.renderFailure && !this.rasterizing) this.scheduleRaster()
     } else if (this.image || this.rasterizing) this.scheduleRaster()
+    this.updateImageCellSize()
     this.yogaNode.markDirty()
     this.requestRender()
   }
@@ -304,13 +306,24 @@ export class GraphicalLatexRenderable extends LatexRenderable {
 
   private updateImageCellSize(): void {
     if (!this.image) return
+    const terminalWidth = this.graphicsContext.terminalWidth ?? 0
+    const terminalHeight = this.graphicsContext.terminalHeight ?? 0
+    const resolution = terminalWidth > 0 && terminalHeight > 0
+      ? this.graphicsContext.resolution
+      : null
+    const cellWidth = resolution?.width
+      ? resolution.width / terminalWidth
+      : DEFAULT_CELL_WIDTH
+    const cellHeight = resolution?.height
+      ? resolution.height / terminalHeight
+      : DEFAULT_CELL_HEIGHT
     this.imageColumns = Math.max(
       1,
-      Math.ceil(this.image.width / (DEFAULT_CELL_WIDTH * this.pixelRatio)),
+      Math.ceil(this.image.width / (cellWidth * this.pixelRatio)),
     )
     this.imageRows = Math.max(
       1,
-      Math.ceil(this.image.height / (DEFAULT_CELL_HEIGHT * this.pixelRatio)),
+      Math.ceil(this.image.height / (cellHeight * this.pixelRatio)),
     )
   }
 

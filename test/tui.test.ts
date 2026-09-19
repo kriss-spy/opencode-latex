@@ -178,6 +178,28 @@ describe("TUI renderer registration", () => {
     expect(compactMath.height).toBeLessThan(largeMath.height)
   })
 
+  test("sizes graphics from the terminal's real cell geometry", async () => {
+    const setup = await createTestRenderer({ width: 40, height: 10 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { kitty_graphics: true })
+    Object.defineProperty(setup.renderer, "resolution", {
+      configurable: true,
+      value: { width: 400, height: 200 },
+    })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, {
+      content: String.raw`I=\int_{-\infty}^{\infty}e^{-x^2}\,dx`,
+      fontSize: 20,
+      pixelRatio: 1,
+    })
+    setup.renderer.root.add(renderable)
+
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    await setup.renderOnce()
+    expect(renderable.height).toBe(3)
+
+    renderable.destroy()
+  })
+
   test("removes one escape layer from globally double-escaped TeX", () => {
     const escaped = String.raw`\\begin{aligned}
 I^2 &= \\left(\\int_{-\\infty}^{\\infty} e^{-x^2} dx\\right)^2 \\\\
@@ -193,6 +215,11 @@ I^2 &= \left(\int_{-\infty}^{\infty} e^{-x^2} dx\right)^2 \\
 
   test("preserves correctly escaped TeX and its row breaks", () => {
     const source = String.raw`\begin{aligned} x &= 1 \\ y &= 2 \end{aligned}`
+    expect(normalizeLatexSource(source)).toBe(source)
+  })
+
+  test("preserves optional spacing after an aligned row break", () => {
+    const source = String.raw`\begin{aligned} x &= 1 \\[4pt] y &= 2 \end{aligned}`
     expect(normalizeLatexSource(source)).toBe(source)
   })
 
