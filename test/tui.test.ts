@@ -161,6 +161,105 @@ describe("TUI renderer registration", () => {
     expect(destroyed).toBe(handle)
   })
 
+  test("composites SIXEL transparency over the actual cell background", async () => {
+    const setup = await createTestRenderer({ width: 40, height: 10 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { sixel: true, kitty_graphics: false })
+    Object.defineProperty(setup.renderer, "resolution", {
+      configurable: true,
+      value: { width: 400, height: 200 },
+    })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, {
+      content: "x",
+      pixelRatio: 1,
+    })
+    setup.renderer.root.add(renderable)
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    await setup.renderOnce()
+
+    const decodedHandle = { kind: "decoded" }
+    const compositedHandle = { kind: "composited" }
+    let compositedPixels: Uint8Array | undefined
+    let drawnHandle: unknown
+    const background = new Uint16Array(40 * 10 * 4)
+    for (let index = 0; index < 40 * 10; index++) {
+      background[index * 4] = 0x22
+      background[index * 4 + 1] = 0x33
+      background[index * 4 + 2] = 0x44
+      background[index * 4 + 3] = 0xff
+    }
+    const fakeBuffer = {
+      width: 40,
+      height: 10,
+      buffers: { bg: background },
+      lib: {
+        imageDecode() {
+          return { status: 0, handle: decodedHandle }
+        },
+        imageCopyPixels(_handle: unknown, destination: Uint8Array) {
+          destination.fill(0)
+          return 0
+        },
+        imageCreateFromRgba(pixels: Uint8Array) {
+          compositedPixels = pixels.slice()
+          return { status: 0, handle: compositedHandle }
+        },
+        imageDestroy() {},
+      },
+      drawImage(image: { ptr: unknown }) {
+        drawnHandle = image.ptr
+        return true
+      },
+    }
+
+    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
+      .renderGraphics(fakeBuffer)
+
+    expect(drawnHandle).toBe(compositedHandle)
+    expect(compositedPixels?.slice(0, 4)).toEqual(Uint8Array.of(0x22, 0x33, 0x44, 0xff))
+    renderable.destroy()
+  })
+
+  test("keeps transparent source pixels for Kitty graphics", async () => {
+    const setup = await createTestRenderer({ width: 40, height: 10 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { kitty_graphics: true, sixel: false })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, { content: "x" })
+    setup.renderer.root.add(renderable)
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    await setup.renderOnce()
+
+    const decodedHandle = {}
+    let createCount = 0
+    let drawnHandle: unknown
+    const fakeBuffer = {
+      width: 40,
+      height: 10,
+      buffers: { bg: new Uint16Array(40 * 10 * 4).fill(0xff) },
+      lib: {
+        imageDecode() {
+          return { status: 0, handle: decodedHandle }
+        },
+        imageCreateFromRgba() {
+          createCount++
+          return { status: 0, handle: {} }
+        },
+        imageDestroy() {},
+      },
+      drawImage(image: { ptr: unknown }) {
+        drawnHandle = image.ptr
+        return true
+      },
+    }
+
+    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
+      .renderGraphics(fakeBuffer)
+
+    expect(createCount).toBe(0)
+    expect(drawnHandle).toBe(decodedHandle)
+    renderable.destroy()
+  })
+
   test("uses a readable graphical font size by default", async () => {
     const standard = await setupPlugin({}, { kitty_graphics: true })
     const explicitStandard = await setupPlugin({ fontSize: 20 }, { kitty_graphics: true })

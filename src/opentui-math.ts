@@ -27,6 +27,18 @@ const DEFAULT_CELL_HEIGHT = 16
 
 interface RuntimeImageLibrary {
   imageDecode(data: Uint8Array): { status: number; handle: unknown | null }
+  imageCopyPixels(
+    handle: unknown,
+    destination: Uint8Array,
+    stride: number,
+    bgra: boolean,
+  ): number
+  imageCreateFromRgba(
+    pixels: Uint8Array,
+    width: number,
+    height: number,
+    stride: number,
+  ): { status: number; handle: unknown | null }
   imageDestroy(handle: unknown): void
 }
 
@@ -59,6 +71,8 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   private graphicsColor: string
   private image: RenderedMathImage | undefined
   private runtimeImage: RuntimeNativeImage | undefined
+  private sixelRuntimeImage: RuntimeNativeImage | undefined
+  private sixelBackdropKey: string | undefined
   private imageColumns = 0
   private imageRows = 0
   private rasterRevision = 0
@@ -186,8 +200,6 @@ export class GraphicalLatexRenderable extends LatexRenderable {
 
   private renderGraphics(buffer: OptimizedBuffer): void {
     if (!this.isUsingGraphics || !this.image || this.width <= 0 || this.height <= 0) return
-    const nativeImage = this.ensureRuntimeImage(buffer)
-    if (!nativeImage) return
     const terminalWidth = this.graphicsContext.terminalWidth ?? 0
     const terminalHeight = this.graphicsContext.terminalHeight ?? 0
     const resolution = terminalWidth > 0 && terminalHeight > 0
@@ -218,6 +230,11 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     const originY = this.buffered ? 0 : this.screenY
     const x = originX + Math.floor((this.width - columns) / 2)
     const y = originY + Math.floor((this.height - rows) / 2)
+    const protocol = this.requestedImageProtocol()
+    const nativeImage = this.effectiveGraphicsProtocol === "sixel"
+      ? this.ensureSixelRuntimeImage(buffer, x, y, columns, rows)
+      : this.ensureRuntimeImage(buffer)
+    if (!nativeImage) return
 
     buffer.drawImage(
       nativeImage as never,
@@ -231,7 +248,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
       0,
       nativeImage.width,
       nativeImage.height,
-      this.requestedImageProtocol(),
+      protocol,
     )
   }
 
@@ -371,11 +388,127 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     return this.runtimeImage
   }
 
+  private ensureSixelRuntimeImage(
+    buffer: OptimizedBuffer,
+    x: number,
+    y: number,
+    columns: number,
+    rows: number,
+  ): RuntimeNativeImage | undefined {
+    const source = this.ensureRuntimeImage(buffer)
+    if (!source) return undefined
+
+    const backgrounds = readCellBackgrounds(buffer, x, y, columns, rows)
+    if (!backgrounds.some((_, index) => index % 4 === 3 && backgrounds[index]! > 0)) {
+      this.disposeSixelRuntimeImage()
+      return source
+    }
+
+    const backdropKey = `${x}:${y}:${columns}:${rows}:${hashBytes(backgrounds)}`
+    if (this.sixelRuntimeImage?.lib === source.lib && this.sixelBackdropKey === backdropKey) {
+      return this.sixelRuntimeImage
+    }
+
+    this.disposeSixelRuntimeImage()
+    const pixels = new Uint8Array(source.width * source.height * 4)
+    const copyStatus = source.lib.imageCopyPixels(source.ptr, pixels, source.width * 4, false)
+    if (copyStatus !== 0) return source
+
+    compositeCellBackgrounds(pixels, source.width, source.height, backgrounds, columns, rows)
+    const created = source.lib.imageCreateFromRgba(pixels, source.width, source.height, source.width * 4)
+    if (created.status !== 0 || !created.handle) return source
+
+    this.sixelRuntimeImage = {
+      lib: source.lib,
+      ptr: created.handle,
+      width: source.width,
+      height: source.height,
+    }
+    this.sixelBackdropKey = backdropKey
+    return this.sixelRuntimeImage
+  }
+
   private disposeRuntimeImage(): void {
+    this.disposeSixelRuntimeImage()
     if (!this.runtimeImage) return
     this.runtimeImage.lib.imageDestroy(this.runtimeImage.ptr)
     this.runtimeImage = undefined
   }
+
+  private disposeSixelRuntimeImage(): void {
+    if (this.sixelRuntimeImage) {
+      this.sixelRuntimeImage.lib.imageDestroy(this.sixelRuntimeImage.ptr)
+      this.sixelRuntimeImage = undefined
+    }
+    this.sixelBackdropKey = undefined
+  }
+}
+
+function readCellBackgrounds(
+  buffer: OptimizedBuffer,
+  x: number,
+  y: number,
+  columns: number,
+  rows: number,
+): Uint8Array {
+  const result = new Uint8Array(columns * rows * 4)
+  const source = buffer.buffers.bg
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const sourceX = x + column
+      const sourceY = y + row
+      if (sourceX < 0 || sourceY < 0 || sourceX >= buffer.width || sourceY >= buffer.height) continue
+      const sourceOffset = (sourceY * buffer.width + sourceX) * 4
+      const targetOffset = (row * columns + column) * 4
+      result[targetOffset] = source[sourceOffset]! & 0xff
+      result[targetOffset + 1] = source[sourceOffset + 1]! & 0xff
+      result[targetOffset + 2] = source[sourceOffset + 2]! & 0xff
+      result[targetOffset + 3] = source[sourceOffset + 3]! & 0xff
+    }
+  }
+  return result
+}
+
+function compositeCellBackgrounds(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  backgrounds: Uint8Array,
+  columns: number,
+  rows: number,
+): void {
+  for (let py = 0; py < height; py++) {
+    const cellY = Math.min(rows - 1, Math.floor(py * rows / height))
+    for (let px = 0; px < width; px++) {
+      const cellX = Math.min(columns - 1, Math.floor(px * columns / width))
+      const pixelOffset = (py * width + px) * 4
+      const backgroundOffset = (cellY * columns + cellX) * 4
+      const sourceAlpha = pixels[pixelOffset + 3]!
+      const backgroundAlpha = backgrounds[backgroundOffset + 3]!
+      if (backgroundAlpha === 0) continue
+
+      const inverseSourceAlpha = 255 - sourceAlpha
+      const outputAlphaScaled = sourceAlpha * 255 + backgroundAlpha * inverseSourceAlpha
+      for (let channel = 0; channel < 3; channel++) {
+        const source = pixels[pixelOffset + channel]!
+        const background = backgrounds[backgroundOffset + channel]!
+        pixels[pixelOffset + channel] = Math.round(
+          (source * sourceAlpha * 255 + background * backgroundAlpha * inverseSourceAlpha) /
+          outputAlphaScaled,
+        )
+      }
+      pixels[pixelOffset + 3] = Math.round(outputAlphaScaled / 255)
+    }
+  }
+}
+
+function hashBytes(bytes: Uint8Array): number {
+  let hash = 0x811c9dc5
+  for (const byte of bytes) {
+    hash ^= byte
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return hash >>> 0
 }
 
 function constrainedSize(intrinsic: number, available: number, mode: MeasureMode): number {
