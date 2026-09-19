@@ -13,6 +13,7 @@ afterEach(() => {
 async function setupPlugin(
   options: Record<string, unknown> = {},
   capabilities?: { kitty_graphics?: boolean; sixel?: boolean },
+  initialRenderMode: "auto" | "kitty" | "cells" | null = null,
 ) {
   const setup = await createTestRenderer({ width: 40, height: 10 })
   cleanups.push(() => setup.renderer.destroy())
@@ -20,6 +21,20 @@ async function setupPlugin(
 
   let language: string | undefined
   let renderCodeBlock: MarkdownCodeBlockRenderer | undefined
+  let command: {
+    title?: string
+    group?: string
+    palette?: boolean
+    slash?: { name: string }
+    run: () => Promise<void>
+  } | undefined
+  let selectedMode: "configured" | "auto" | "kitty" | "cells" | undefined
+  let selectInput: {
+    current?: "configured" | "auto" | "kitty" | "cells"
+    options: Array<{ value: "configured" | "auto" | "kitty" | "cells" }>
+  } | undefined
+  const settings = { graphicsMode: initialRenderMode }
+  const toasts: Array<{ message: string }> = []
   const unregister = () => {}
   const pluginCleanup = plugin.setup({
     renderer: setup.renderer,
@@ -32,9 +47,45 @@ async function setupPlugin(
         return unregister
       },
     },
+    storage: {
+      store() {
+        return [settings, async (mutation: (draft: typeof settings) => void) => mutation(settings)]
+      },
+    },
+    keymap: {
+      layer(factory: () => { commands?: Array<typeof command> }) {
+        command = factory().commands?.[0]
+      },
+    },
+    ui: {
+      dialog: {
+        async select(input: typeof selectInput) {
+          selectInput = input
+          return selectedMode
+        },
+      },
+      toast: {
+        show(input: { message: string }) {
+          toasts.push(input)
+        },
+      },
+    },
   } as never)
 
-  return { language, pluginCleanup, renderCodeBlock, setup, unregister }
+  return {
+    command,
+    language,
+    pluginCleanup,
+    renderCodeBlock,
+    selectInput: () => selectInput,
+    selectMode(mode: typeof selectedMode) {
+      selectedMode = mode
+    },
+    settings,
+    setup,
+    toasts,
+    unregister,
+  }
 }
 
 describe("TUI renderer registration", () => {
@@ -544,6 +595,83 @@ I^2 &= \left(\int_{-\infty}^{\infty} e^{-x^2} dx\right)^2 \\
     expect(registered.setup.captureCharFrame()).toContain("─")
   })
 
+  test("uses a persisted render mode in preference to plugin configuration", async () => {
+    const registered = await setupPlugin(
+      { graphicsMode: "kitty" },
+      { kitty_graphics: true },
+      "cells",
+    )
+
+    const renderable = registered.renderCodeBlock!(
+      { text: "x^2" } as never,
+      { defaultRender: () => null } as never,
+    ) as GraphicalLatexRenderable
+
+    expect(await renderable.whenGraphicsReady()).toBe(false)
+    renderable.destroy()
+  })
+
+  test("exposes a command that changes the default render mode", async () => {
+    const registered = await setupPlugin({}, { kitty_graphics: true })
+    const existing = registered.renderCodeBlock!(
+      { text: "x^2" } as never,
+      { defaultRender: () => null } as never,
+    ) as GraphicalLatexRenderable
+    expect(await existing.whenGraphicsReady()).toBe(true)
+
+    registered.selectMode("cells")
+    await registered.command!.run()
+
+    expect(registered.command?.title).toBe("Set default render mode")
+    expect(registered.command?.group).toBe("LaTeX")
+    expect(registered.command?.palette).toBe(true)
+    expect(registered.command?.slash?.name).toBe("latex-render-mode")
+    expect(registered.selectInput()?.current).toBe("configured")
+    expect(registered.selectInput()?.options.map(({ value }) => value)).toEqual([
+      "configured",
+      "auto",
+      "kitty",
+      "cells",
+    ])
+    expect(registered.settings.graphicsMode).toBe("cells")
+    const next = registered.renderCodeBlock!(
+      { text: "y^2" } as never,
+      { defaultRender: () => null } as never,
+    ) as GraphicalLatexRenderable
+    expect(await existing.whenGraphicsReady()).toBe(true)
+    expect(await next.whenGraphicsReady()).toBe(false)
+    expect(registered.toasts.at(-1)?.message).toContain("Unicode cells")
+    existing.destroy()
+    next.destroy()
+  })
+
+  test("can reset the UI preference to the configured default", async () => {
+    const registered = await setupPlugin(
+      { graphicsMode: "kitty" },
+      { kitty_graphics: true },
+      "cells",
+    )
+    const existing = registered.renderCodeBlock!(
+      { text: "x^2" } as never,
+      { defaultRender: () => null } as never,
+    ) as GraphicalLatexRenderable
+    expect(await existing.whenGraphicsReady()).toBe(false)
+
+    registered.selectMode("configured")
+    await registered.command!.run()
+
+    expect(registered.selectInput()?.current).toBe("cells")
+    expect(registered.settings.graphicsMode).toBeNull()
+    const next = registered.renderCodeBlock!(
+      { text: "y^2" } as never,
+      { defaultRender: () => null } as never,
+    ) as GraphicalLatexRenderable
+    expect(await existing.whenGraphicsReady()).toBe(false)
+    expect(await next.whenGraphicsReady()).toBe(true)
+    existing.destroy()
+    next.destroy()
+  })
+
   test("does not hide renderer registration failures", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())
@@ -552,6 +680,16 @@ I^2 &= \left(\int_{-\infty}^{\infty} e^{-x^2} dx\right)^2 \\
       renderer: setup.renderer,
       options: {},
       themeMode: "dark",
+      storage: {
+        store() {
+          return [{ graphicsMode: null }, async () => {}]
+        },
+      },
+      keymap: { layer() {} },
+      ui: {
+        dialog: { select: async () => undefined },
+        toast: { show() {} },
+      },
       markdown: {
         registerCodeBlockRenderer() {
           throw new Error("unexpected failure")

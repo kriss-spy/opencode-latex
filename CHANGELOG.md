@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.0 - 2026-09-19
+
+- Adds a **LaTeX: Set default render mode** command to the command palette and `/latex-render-mode` slash command.
+- Persists the selected automatic, Kitty, or Unicode-cell mode across TUI restarts.
+- Applies the selected default whenever LaTeX formulas are rendered.
+- Allows the saved preference to be cleared so plugin configuration becomes authoritative again.
+
 ## 0.1.1 - 2026-09-19
 
 - Removes visible right and bottom seams around SIXEL-rendered formulas in embedded xterm.js terminals such as `obsidian-opencode`.

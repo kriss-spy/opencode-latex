@@ -23,7 +23,7 @@ Graphical output uses Kitty graphics in terminals such as Ghostty and Kitty, or 
 Install the package globally through OpenCode:
 
 ```sh
-opencode plugin add opencode-latex@0.1.1
+opencode plugin add opencode-latex@0.2.0
 ```
 
 Alternatively, add it to `opencode.jsonc`:
@@ -31,7 +31,7 @@ Alternatively, add it to `opencode.jsonc`:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-latex@0.1.1"]
+  "plugins": ["opencode-latex@0.2.0"]
 }
 ```
 
@@ -72,6 +72,16 @@ I^2 &= \int_0^{2\pi}\int_0^\infty e^{-r^2}r\,dr\,d\theta \\
 
 Use the `latex` fence exactly; this plugin registers that language without replacing other Markdown renderers.
 
+### Choose a default render mode
+
+Open the command palette with `Ctrl+P` and select **LaTeX: Set default render mode**, or run:
+
+```text
+/latex-render-mode
+```
+
+Choose automatic graphics detection, forced Kitty graphics, or portable Unicode cells. The selection is saved across TUI restarts and applies whenever formulas are rendered. Choose **Use configured default** to return to the `graphicsMode` value from plugin configuration.
+
 ## Options
 
 Options are optional:
@@ -80,7 +90,7 @@ Options are optional:
 {
   "plugins": [
     {
-      "package": "opencode-latex@0.1.1",
+      "package": "opencode-latex@0.2.0",
       "options": {
         "color": "#d4d4d4",
         "graphicsMode": "auto",
@@ -93,7 +103,7 @@ Options are optional:
 ```
 
 - `color` sets the equation foreground. Its default follows OpenCode's light or dark theme.
-- `graphicsMode` selects `"auto"`, forced `"kitty"`, or portable `"cells"` rendering. The default is `"auto"`.
+- `graphicsMode` selects `"auto"`, forced `"kitty"`, or portable `"cells"` rendering. The default is `"auto"`; a saved command-palette selection overrides it until **Use configured default** is selected.
 - `fontSize` sets the graphical MathJax font size. The default is `20`.
 - `pixelRatio` increases raster sharpness without changing the intended cell footprint. The default is `2`.
 
