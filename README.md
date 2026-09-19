@@ -2,7 +2,7 @@
 
 An OpenCode v2 plugin that renders LaTeX in agent messages as terminal images.
 
-The server plugin asks agents to emit display equations in fenced `latex` blocks. The CLI plugin turns `latex`, `tex`, and `math` blocks into PNGs with MathJax and displays them through OpenTUI. If an expression cannot be rendered, OpenCode's normal fenced-code renderer is used instead.
+The server plugin asks agents to emit display equations in fenced `latex` blocks. The CLI plugin turns `latex` and `math` blocks into PNGs with MathJax and displays them through OpenTUI. If an expression cannot be rendered, OpenCode's normal fenced-code renderer is used instead. OpenCode treats `tex` as an alias for `latex`, so the plugin does not register it separately.
 
 ## Install
 

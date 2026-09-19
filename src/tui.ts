@@ -2,7 +2,7 @@ import { ImageRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
 import { renderLatex } from "./render.js"
 
-const LANGUAGES = ["latex", "tex", "math"] as const
+const LANGUAGES = ["latex", "math"] as const
 
 function positiveNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback
