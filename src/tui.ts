@@ -2,10 +2,17 @@ import { ImageRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
 import { renderLatex } from "./render.js"
 
-const LANGUAGES = ["latex", "tex", "math"] as const
+const LANGUAGE = "latex"
 
 function positiveNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function isDuplicateRenderer(error: unknown, language: string): boolean {
+  const message = typeof error === "object" && error !== null && "message" in error
+    ? String(error.message)
+    : String(error)
+  return message.includes(`Markdown code-block renderer already registered: ${language}`)
 }
 
 export default Plugin.define({
@@ -18,8 +25,8 @@ export default Plugin.define({
     const cellWidth = positiveNumber(context.options.cellWidth, 8)
     const cellHeight = positiveNumber(context.options.cellHeight, 16)
 
-    const unregisterRenderers = LANGUAGES.map((language) =>
-      context.markdown.registerCodeBlockRenderer(language, (token, render) => {
+    try {
+      return context.markdown.registerCodeBlockRenderer(LANGUAGE, (token, render) => {
         try {
           const image = renderLatex(token.text, { color, scale })
           return new ImageRenderable(context.renderer, {
@@ -31,9 +38,9 @@ export default Plugin.define({
         } catch {
           return render.defaultRender()
         }
-      }),
-    )
-
-    return () => unregisterRenderers.forEach((dispose) => dispose())
+      })
+    } catch (error) {
+      if (!isDuplicateRenderer(error, LANGUAGE)) throw error
+    }
   },
 })
