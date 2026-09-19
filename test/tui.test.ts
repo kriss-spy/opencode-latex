@@ -123,6 +123,44 @@ describe("TUI renderer registration", () => {
     renderable.destroy()
   })
 
+  test("decodes graphics with the host buffer's OpenTUI runtime", async () => {
+    const setup = await createTestRenderer({ width: 40, height: 10 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { kitty_graphics: true })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, { content: "x^2" })
+    setup.renderer.root.add(renderable)
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    await setup.renderOnce()
+
+    const handle = {}
+    let decodeCount = 0
+    let destroyed: unknown
+    let drawnImage: { ptr: unknown } | undefined
+    const fakeBuffer = {
+      lib: {
+        imageDecode() {
+          decodeCount++
+          return { status: 0, handle }
+        },
+        imageDestroy(value: unknown) {
+          destroyed = value
+        },
+      },
+      drawImage(image: { ptr: unknown }) {
+        drawnImage = image
+        return true
+      },
+    }
+
+    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
+      .renderGraphics(fakeBuffer)
+    expect(decodeCount).toBe(1)
+    expect(drawnImage?.ptr).toBe(handle)
+
+    renderable.destroy()
+    expect(destroyed).toBe(handle)
+  })
+
   test("uses a compact graphical font size by default", async () => {
     const compact = await setupPlugin({}, { kitty_graphics: true })
     const large = await setupPlugin({ fontSize: 32 }, { kitty_graphics: true })

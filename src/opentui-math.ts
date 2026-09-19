@@ -25,6 +25,18 @@ export interface GraphicalLatexRenderableOptions extends LatexRenderableOptions 
 const DEFAULT_CELL_WIDTH = 8
 const DEFAULT_CELL_HEIGHT = 16
 
+interface RuntimeImageLibrary {
+  imageDecode(data: Uint8Array): { status: number; handle: unknown | null }
+  imageDestroy(handle: unknown): void
+}
+
+interface RuntimeNativeImage {
+  readonly lib: RuntimeImageLibrary
+  readonly ptr: unknown
+  readonly width: number
+  readonly height: number
+}
+
 /**
  * A narrow fork of opentui-math's graphical renderable. MathJax still creates
  * the PNG, while OpenTUI's image buffer owns Kitty/SIXEL transport and cleanup.
@@ -46,6 +58,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   private graphicsColorFollowsForeground: boolean
   private graphicsColor: string
   private image: RenderedMathImage | undefined
+  private runtimeImage: RuntimeNativeImage | undefined
   private imageColumns = 0
   private imageRows = 0
   private rasterRevision = 0
@@ -79,7 +92,6 @@ export class GraphicalLatexRenderable extends LatexRenderable {
       fit: "fit",
       protocol: this.requestedImageProtocol(),
     })
-
     this.setupGraphicsMeasureFunction()
     this.graphicsContext.on("capabilities", this.handleCapabilities)
     this.graphicsContext.on("frame", this.handleFrame)
@@ -137,8 +149,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   }
 
   public get isUsingGraphics(): boolean {
-    return this.canUseGraphics() && Boolean(this.image && this.graphicsImage.image) &&
-      !this.renderFailure
+    return this.canUseGraphics() && Boolean(this.image) && !this.renderFailure
   }
 
   public get graphicsError(): Error | undefined {
@@ -170,12 +181,24 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     if (background.a > 0 && this.width > 0 && this.height > 0) {
       buffer.fillRect(originX, originY, this.width, this.height, background)
     }
+    this.renderGraphics(buffer)
+  }
 
-    const nativeImage = this.graphicsImage.image
-    if (!nativeImage || this.width <= 0 || this.height <= 0) return
-    const fitted = this.graphicsImage.getFittedSize(this.width, this.height)
+  private renderGraphics(buffer: OptimizedBuffer): void {
+    if (!this.isUsingGraphics || !this.image || this.width <= 0 || this.height <= 0) return
+    const nativeImage = this.ensureRuntimeImage(buffer)
+    if (!nativeImage) return
+    const fitted = this.graphicsImage.getFittedSize(
+      this.width,
+      this.height,
+      this.graphicsImage.cellAspectRatio,
+      this.image.width,
+      this.image.height,
+    )
     if (fitted.width <= 0 || fitted.height <= 0) return
 
+    const originX = this.buffered ? 0 : this.screenX
+    const originY = this.buffered ? 0 : this.screenY
     const x = originX + Math.floor((this.width - fitted.width) / 2)
     const y = originY + Math.floor((this.height - fitted.height) / 2)
     const terminalWidth = this.graphicsContext.terminalWidth ?? 0
@@ -191,7 +214,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
       : 0
 
     buffer.drawImage(
-      nativeImage,
+      nativeImage as never,
       x,
       y,
       fitted.width,
@@ -210,6 +233,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     this.graphicsContext.off("capabilities", this.handleCapabilities)
     this.graphicsContext.off("frame", this.handleFrame)
     this.graphicsContext.off("resize", this.handleResize)
+    this.disposeRuntimeImage()
     if (!this.graphicsImage.isDestroyed) this.graphicsImage.destroy()
     super.destroySelf()
   }
@@ -257,15 +281,12 @@ export class GraphicalLatexRenderable extends LatexRenderable {
       ...this.graphicsParseOptions,
       ...this.rasterLimitOptions,
     })
-      .then(async (image) => {
+      .then((image) => {
         if (revision !== this.rasterRevision || this.isDestroyed) return
+        this.disposeRuntimeImage()
         this.image = image
         this.updateImageCellSize()
         this.graphicsImage.protocol = this.requestedImageProtocol()
-        this.graphicsImage.source = image.png
-        await this.graphicsImage.loadPromise
-        if (revision !== this.rasterRevision || this.isDestroyed) return
-        if (this.graphicsImage.loadError) throw this.graphicsImage.loadError
         this.yogaNode.markDirty()
         this.requestRender()
       })
@@ -304,8 +325,8 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   }
 
   private clearGraphics(): void {
+    this.disposeRuntimeImage()
     this.image = undefined
-    this.graphicsImage.source = undefined
   }
 
   private setupGraphicsMeasureFunction(): void {
@@ -317,6 +338,35 @@ export class GraphicalLatexRenderable extends LatexRenderable {
         height: constrainedSize(intrinsicHeight, height, heightMode),
       }
     })
+  }
+
+  private ensureRuntimeImage(buffer: OptimizedBuffer): RuntimeNativeImage | undefined {
+    if (!this.image) return undefined
+    // TUI plugins can resolve a separate @opentui/core module. Decode through
+    // the target buffer's native library so its image handle is valid there.
+    const lib = (buffer as unknown as { lib: RuntimeImageLibrary }).lib
+    if (this.runtimeImage?.lib === lib) return this.runtimeImage
+    this.disposeRuntimeImage()
+
+    const decoded = lib.imageDecode(this.image.png)
+    if (decoded.status !== 0 || !decoded.handle) {
+      this.renderFailure = new Error(`OpenTUI image decode failed with status ${decoded.status}`)
+      this.requestRender()
+      return undefined
+    }
+    this.runtimeImage = {
+      lib,
+      ptr: decoded.handle,
+      width: this.image.width,
+      height: this.image.height,
+    }
+    return this.runtimeImage
+  }
+
+  private disposeRuntimeImage(): void {
+    if (!this.runtimeImage) return
+    this.runtimeImage.lib.imageDestroy(this.runtimeImage.ptr)
+    this.runtimeImage = undefined
   }
 }
 
