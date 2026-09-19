@@ -2,7 +2,7 @@
 
 An OpenCode v2 plugin that renders LaTeX in agent messages with [`opentui-math`](https://opentui-math.dev/).
 
-The server plugin asks agents to emit display equations in fenced `latex` blocks. The CLI plugin renders those blocks as high-resolution MathJax graphics in Kitty-compatible terminals and automatically falls back to selectable Unicode cells everywhere else. If a renderable cannot be created, OpenCode's normal fenced-code renderer is used instead.
+The server plugin asks agents to emit display equations in fenced `latex` blocks. The CLI plugin renders those blocks as high-resolution MathJax graphics through OpenTUI's native image pipeline: Kitty graphics in terminals such as Ghostty and SIXEL in compatible xterm.js terminals. It automatically falls back to selectable Unicode cells everywhere else. If a renderable cannot be created, OpenCode's normal fenced-code renderer is used instead.
 
 ## Install
 
@@ -44,7 +44,7 @@ Options are optional and apply to the CLI renderer:
       "options": {
         "color": "#d4d4d4",
         "graphicsMode": "auto",
-        "fontSize": 32,
+        "fontSize": 20,
         "pixelRatio": 1
       }
     }
@@ -54,7 +54,7 @@ Options are optional and apply to the CLI renderer:
 
 - `color` sets the equation foreground. It defaults to a light or dark theme-aware value.
 - `graphicsMode` selects `"auto"`, `"kitty"`, or portable `"cells"` rendering.
-- `fontSize` controls the graphical MathJax font size.
+- `fontSize` controls the graphical MathJax font size and defaults to `20`.
 - `pixelRatio` increases graphical raster sharpness without changing the cell footprint.
 
 ## Develop
@@ -65,4 +65,6 @@ bun run typecheck
 bun test
 ```
 
-Requires OpenCode v2. High-resolution output is available in Kitty-compatible terminals such as Ghostty, Kitty, and WezTerm; other terminals and multiplexers use the Unicode-cell renderer.
+Requires OpenCode v2. High-resolution output is available through Kitty graphics in Ghostty, Kitty, and WezTerm, or through SIXEL in compatible terminals such as `obsidian-opencode`. Other terminals and multiplexers use the Unicode-cell renderer.
+
+The narrow `opentui-math` transport fork lives in `src/opentui-math.ts`. It continues to use the upstream package for MathJax rasterization and Unicode-cell fallback while routing graphical output through OpenTUI.

@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin/tui"
-import { GraphicalLatexRenderable } from "opentui-math/graphics"
+import { GraphicalLatexRenderable } from "./opentui-math.js"
 
 const LANGUAGE = "latex"
 const GRAPHICS_MODES = ["auto", "kitty", "cells"] as const
@@ -31,7 +31,7 @@ export default Plugin.define({
     const color = typeof context.options.color === "string"
       ? context.options.color
       : context.themeMode === "light" ? "#24292f" : "#d4d4d4"
-    const fontSize = positiveNumber(context.options.fontSize, 32)
+    const fontSize = positiveNumber(context.options.fontSize, 20)
     const pixelRatio = positiveNumber(context.options.pixelRatio, 1)
     const mode = graphicsMode(context.options.graphicsMode)
 
