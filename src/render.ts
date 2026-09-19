@@ -9,6 +9,8 @@ import { SVG } from "mathjax-full/js/output/svg.js"
 const adaptor = liteAdaptor()
 RegisterHTMLHandler(adaptor)
 
+const GEOMETRIC_PRECISION = 2 as const
+
 const document = mathjax.document("", {
   InputJax: new TeX({ packages: AllPackages }),
   OutputJax: new SVG({ fontCache: "local" }),
@@ -17,12 +19,15 @@ const document = mathjax.document("", {
 export interface RenderLatexOptions {
   color?: string
   scale?: number
+  pixelRatio?: number
 }
 
 export interface RenderedLatex {
   png: Uint8Array
   width: number
   height: number
+  displayWidth: number
+  displayHeight: number
 }
 
 export function normalizeLatex(source: string): string {
@@ -46,14 +51,23 @@ export function latexToSvg(source: string, color = "#d4d4d4"): string {
 
 export function renderLatex(source: string, options: RenderLatexOptions = {}): RenderedLatex {
   const svg = latexToSvg(source, options.color)
-  const rendered = new Resvg(svg, {
-    fitTo: { mode: "zoom", value: options.scale ?? 2 },
-    font: { loadSystemFonts: true },
-  }).render()
+  const scale = options.scale ?? 2
+  const pixelRatio = options.pixelRatio ?? 2
+
+  const createRenderer = (zoom: number, loadSystemFonts: boolean) => new Resvg(svg, {
+    fitTo: { mode: "zoom", value: zoom },
+    font: { loadSystemFonts },
+    shapeRendering: GEOMETRIC_PRECISION,
+    textRendering: GEOMETRIC_PRECISION,
+  })
+  const display = createRenderer(scale, false).render()
+  const rendered = createRenderer(scale * pixelRatio, true).render()
 
   return {
     png: rendered.asPng(),
     width: rendered.width,
     height: rendered.height,
+    displayWidth: display.width,
+    displayHeight: display.height,
   }
 }

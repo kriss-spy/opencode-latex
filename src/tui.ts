@@ -15,17 +15,18 @@ export default Plugin.define({
       ? context.options.color
       : context.themeMode === "light" ? "#24292f" : "#d4d4d4"
     const scale = positiveNumber(context.options.scale, 2)
+    const pixelRatio = positiveNumber(context.options.pixelRatio, 2)
     const cellWidth = positiveNumber(context.options.cellWidth, 8)
     const cellHeight = positiveNumber(context.options.cellHeight, 16)
 
     const unregisterRenderers = LANGUAGES.map((language) =>
       context.markdown.registerCodeBlockRenderer(language, (token, render) => {
         try {
-          const image = renderLatex(token.text, { color, scale })
+          const image = renderLatex(token.text, { color, scale, pixelRatio })
           return new ImageRenderable(context.renderer, {
             source: image.png,
-            width: Math.max(1, Math.ceil(image.width / cellWidth)),
-            height: Math.max(1, Math.ceil(image.height / cellHeight)),
+            width: Math.max(1, Math.ceil(image.displayWidth / cellWidth)),
+            height: Math.max(1, Math.ceil(image.displayHeight / cellHeight)),
             fit: "fit",
           })
         } catch {

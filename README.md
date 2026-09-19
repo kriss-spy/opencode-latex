@@ -44,6 +44,7 @@ Options are optional and apply to the CLI renderer:
       "options": {
         "color": "#d4d4d4",
         "scale": 2,
+        "pixelRatio": 2,
         "cellWidth": 8,
         "cellHeight": 16
       }
@@ -53,7 +54,8 @@ Options are optional and apply to the CLI renderer:
 ```
 
 - `color` sets the equation foreground. It defaults to a light or dark theme-aware value.
-- `scale` controls raster resolution.
+- `scale` controls the displayed equation size.
+- `pixelRatio` controls raster sharpness without changing the displayed size. It defaults to `2`.
 - `cellWidth` and `cellHeight` tune pixel-to-terminal-cell sizing for a terminal font.
 
 ## Develop
