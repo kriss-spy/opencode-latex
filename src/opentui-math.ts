@@ -199,8 +199,12 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     const cellHeight = resolution?.height
       ? resolution.height / terminalHeight
       : DEFAULT_CELL_HEIGHT
-    const naturalPixelWidth = this.image.width / this.pixelRatio
-    const naturalPixelHeight = this.image.height / this.pixelRatio
+    const terminalScale = Math.min(
+      cellWidth / DEFAULT_CELL_WIDTH,
+      cellHeight / DEFAULT_CELL_HEIGHT,
+    )
+    const naturalPixelWidth = this.image.width / this.pixelRatio * terminalScale
+    const naturalPixelHeight = this.image.height / this.pixelRatio * terminalScale
     const scale = Math.min(
       1,
       this.width * cellWidth / naturalPixelWidth,
@@ -308,24 +312,13 @@ export class GraphicalLatexRenderable extends LatexRenderable {
 
   private updateImageCellSize(): void {
     if (!this.image) return
-    const terminalWidth = this.graphicsContext.terminalWidth ?? 0
-    const terminalHeight = this.graphicsContext.terminalHeight ?? 0
-    const resolution = terminalWidth > 0 && terminalHeight > 0
-      ? this.graphicsContext.resolution
-      : null
-    const cellWidth = resolution?.width
-      ? resolution.width / terminalWidth
-      : DEFAULT_CELL_WIDTH
-    const cellHeight = resolution?.height
-      ? resolution.height / terminalHeight
-      : DEFAULT_CELL_HEIGHT
     this.imageColumns = Math.max(
       1,
-      Math.ceil(this.image.width / (cellWidth * this.pixelRatio)),
+      Math.ceil(this.image.width / (DEFAULT_CELL_WIDTH * this.pixelRatio)),
     )
     this.imageRows = Math.max(
       1,
-      Math.ceil(this.image.height / (cellHeight * this.pixelRatio)),
+      Math.ceil(this.image.height / (DEFAULT_CELL_HEIGHT * this.pixelRatio)),
     )
   }
 

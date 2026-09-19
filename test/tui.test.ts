@@ -184,7 +184,7 @@ describe("TUI renderer registration", () => {
     expect(standardMath.height).toBeLessThan(largeMath.height)
   })
 
-  test("sizes graphics from the terminal's real cell geometry", async () => {
+  test("keeps a stable cell footprint while using terminal pixel geometry", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())
     setRendererCapabilities(setup.renderer, { kitty_graphics: true })
@@ -201,7 +201,7 @@ describe("TUI renderer registration", () => {
 
     expect(await renderable.whenGraphicsReady()).toBe(true)
     await setup.renderOnce()
-    expect(renderable.height).toBe(3)
+    expect(renderable.height).toBe(4)
 
     renderable.destroy()
   })
@@ -252,13 +252,60 @@ describe("TUI renderer registration", () => {
     expect(await multiline.whenGraphicsReady()).toBe(true)
     await setup.renderOnce()
     expect(placements).toHaveLength(2)
+    const widthScale = placements[0]!.pixelWidth / placements[0]!.sourceWidth
+    const heightScale = placements[0]!.pixelHeight / placements[0]!.sourceHeight
     for (const placement of placements) {
-      expect(placement.pixelWidth / placement.sourceWidth).toBeCloseTo(0.5, 1)
-      expect(placement.pixelHeight / placement.sourceHeight).toBeCloseTo(0.5, 1)
+      expect(placement.pixelWidth / placement.sourceWidth).toBeCloseTo(widthScale, 1)
+      expect(placement.pixelHeight / placement.sourceHeight).toBeCloseTo(heightScale, 1)
     }
 
     single.destroy()
     multiline.destroy()
+  })
+
+  test("scales graphics with terminal cell zoom", async () => {
+    const setup = await createTestRenderer({ width: 120, height: 40 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { kitty_graphics: true })
+    let resolution = { width: 1200, height: 800 }
+    Object.defineProperty(setup.renderer, "resolution", {
+      configurable: true,
+      get: () => resolution,
+    })
+    const placements: Array<{ pixelWidth: number; pixelHeight: number }> = []
+    Object.defineProperty(setup.renderer.nextRenderBuffer, "drawImage", {
+      configurable: true,
+      value: (
+        _image: unknown,
+        _x: number,
+        _y: number,
+        _width: number,
+        _height: number,
+        pixelWidth: number,
+        pixelHeight: number,
+      ) => {
+        placements.push({ pixelWidth, pixelHeight })
+        return true
+      },
+    })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, {
+      content: String.raw`I=\int_{-\infty}^{\infty}e^{-x^2}\,dx`,
+      fontSize: 20,
+      pixelRatio: 2,
+    })
+    setup.renderer.root.add(renderable)
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    await setup.renderOnce()
+    const normal = placements.at(-1)!
+
+    resolution = { width: 2400, height: 1600 }
+    setup.renderer.emit("resize", setup.renderer.terminalWidth, setup.renderer.terminalHeight)
+    await setup.renderOnce()
+    const zoomed = placements.at(-1)!
+
+    expect(zoomed.pixelWidth / normal.pixelWidth).toBeCloseTo(2, 1)
+    expect(zoomed.pixelHeight / normal.pixelHeight).toBeCloseTo(2, 1)
+    renderable.destroy()
   })
 
   test("removes one escape layer from globally double-escaped TeX", () => {
