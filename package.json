@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "opencode-latex",
+  "version": "0.1.0",
+  "description": "Render LaTeX from OpenCode agent messages as terminal images.",
+  "type": "module",
+  "license": "MIT",
+  "files": ["src", "README.md", "LICENSE"],
+  "exports": {
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.8",
+    "@resvg/resvg-js": "^2.6.2",
+    "mathjax-full": "^3.2.2"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.10",
+    "solid-js": ">=1.9.0"
+  },
+  "devDependencies": {
+    "@opentui/core": "^0.5.11",
+    "@types/bun": "^1.2.23",
+    "solid-js": "^1.9.9",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": ["opencode", "opencode-plugin", "latex", "math", "tui"]
+}
