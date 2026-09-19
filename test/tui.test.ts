@@ -206,6 +206,61 @@ describe("TUI renderer registration", () => {
     renderable.destroy()
   })
 
+  test("keeps single-line and multiline graphics at one pixel scale", async () => {
+    const setup = await createTestRenderer({ width: 120, height: 40 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { kitty_graphics: true })
+    Object.defineProperty(setup.renderer, "resolution", {
+      configurable: true,
+      value: { width: 1200, height: 800 },
+    })
+    const placements: Array<{ pixelWidth: number; pixelHeight: number; sourceWidth: number; sourceHeight: number }> = []
+    const buffer = setup.renderer.nextRenderBuffer
+    Object.defineProperty(buffer, "drawImage", {
+      configurable: true,
+      value: (
+        _image: unknown,
+        _x: number,
+        _y: number,
+        _width: number,
+        _height: number,
+        pixelWidth: number,
+        pixelHeight: number,
+        _sourceX: number,
+        _sourceY: number,
+        sourceWidth: number,
+        sourceHeight: number,
+      ) => {
+        placements.push({ pixelWidth, pixelHeight, sourceWidth, sourceHeight })
+        return true
+      },
+    })
+    const single = new GraphicalLatexRenderable(setup.renderer, {
+      content: String.raw`I=\int_{-\infty}^{\infty}e^{-x^2}\,dx`,
+      fontSize: 20,
+      pixelRatio: 2,
+    })
+    const multiline = new GraphicalLatexRenderable(setup.renderer, {
+      content: String.raw`\begin{aligned} I^2 &= \pi \\ I &= \sqrt{\pi} \end{aligned}`,
+      fontSize: 20,
+      pixelRatio: 2,
+    })
+    setup.renderer.root.add(single)
+    setup.renderer.root.add(multiline)
+
+    expect(await single.whenGraphicsReady()).toBe(true)
+    expect(await multiline.whenGraphicsReady()).toBe(true)
+    await setup.renderOnce()
+    expect(placements).toHaveLength(2)
+    for (const placement of placements) {
+      expect(placement.pixelWidth / placement.sourceWidth).toBeCloseTo(0.5, 1)
+      expect(placement.pixelHeight / placement.sourceHeight).toBeCloseTo(0.5, 1)
+    }
+
+    single.destroy()
+    multiline.destroy()
+  })
+
   test("removes one escape layer from globally double-escaped TeX", () => {
     const escaped = String.raw`\\begin{aligned}
 I^2 &= \\left(\\int_{-\\infty}^{\\infty} e^{-x^2} dx\\right)^2 \\\\

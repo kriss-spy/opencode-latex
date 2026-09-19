@@ -188,37 +188,39 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     if (!this.isUsingGraphics || !this.image || this.width <= 0 || this.height <= 0) return
     const nativeImage = this.ensureRuntimeImage(buffer)
     if (!nativeImage) return
-    const fitted = this.graphicsImage.getFittedSize(
-      this.width,
-      this.height,
-      this.graphicsImage.cellAspectRatio,
-      this.image.width,
-      this.image.height,
-    )
-    if (fitted.width <= 0 || fitted.height <= 0) return
-
-    const originX = this.buffered ? 0 : this.screenX
-    const originY = this.buffered ? 0 : this.screenY
-    const x = originX + Math.floor((this.width - fitted.width) / 2)
-    const y = originY + Math.floor((this.height - fitted.height) / 2)
     const terminalWidth = this.graphicsContext.terminalWidth ?? 0
     const terminalHeight = this.graphicsContext.terminalHeight ?? 0
     const resolution = terminalWidth > 0 && terminalHeight > 0
       ? this.graphicsContext.resolution
       : null
-    const pixelWidth = resolution
-      ? Math.max(1, Math.round(fitted.width * resolution.width / terminalWidth))
-      : 0
-    const pixelHeight = resolution
-      ? Math.max(1, Math.round(fitted.height * resolution.height / terminalHeight))
-      : 0
+    const cellWidth = resolution?.width
+      ? resolution.width / terminalWidth
+      : DEFAULT_CELL_WIDTH
+    const cellHeight = resolution?.height
+      ? resolution.height / terminalHeight
+      : DEFAULT_CELL_HEIGHT
+    const naturalPixelWidth = this.image.width / this.pixelRatio
+    const naturalPixelHeight = this.image.height / this.pixelRatio
+    const scale = Math.min(
+      1,
+      this.width * cellWidth / naturalPixelWidth,
+      this.height * cellHeight / naturalPixelHeight,
+    )
+    const pixelWidth = Math.max(1, Math.round(naturalPixelWidth * scale))
+    const pixelHeight = Math.max(1, Math.round(naturalPixelHeight * scale))
+    const columns = Math.max(1, Math.min(this.width, Math.ceil(pixelWidth / cellWidth)))
+    const rows = Math.max(1, Math.min(this.height, Math.ceil(pixelHeight / cellHeight)))
+    const originX = this.buffered ? 0 : this.screenX
+    const originY = this.buffered ? 0 : this.screenY
+    const x = originX + Math.floor((this.width - columns) / 2)
+    const y = originY + Math.floor((this.height - rows) / 2)
 
     buffer.drawImage(
       nativeImage as never,
       x,
       y,
-      fitted.width,
-      fitted.height,
+      columns,
+      rows,
       pixelWidth,
       pixelHeight,
       0,
