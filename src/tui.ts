@@ -15,6 +15,16 @@ function graphicsMode(value: unknown): GraphicsMode {
     : "auto"
 }
 
+export function normalizeLatexSource(source: string): string {
+  const commandSlashRuns = source.match(/\\+(?=[A-Za-z]+)/g) ?? []
+  const hasDoubleEscapedCommand = commandSlashRuns.some((run) => run.length > 1)
+  const hasCorrectlyEscapedCommand = commandSlashRuns.some((run) => run.length === 1)
+
+  return hasDoubleEscapedCommand && !hasCorrectlyEscapedCommand
+    ? source.replaceAll("\\\\", "\\")
+    : source
+}
+
 export default Plugin.define({
   id: "opencode.latex.tui",
   setup(context) {
@@ -28,7 +38,7 @@ export default Plugin.define({
     return context.markdown.registerCodeBlockRenderer(LANGUAGE, (token, render) => {
       try {
         return new GraphicalLatexRenderable(context.renderer, {
-          content: token.text,
+          content: normalizeLatexSource(token.text),
           displayMode: true,
           fallback: "source",
           foregroundColor: color,

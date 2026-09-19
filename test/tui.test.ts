@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import type { MarkdownCodeBlockRenderer } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { GraphicalLatexRenderable } from "opentui-math/graphics"
-import plugin from "../src/tui.js"
+import plugin, { normalizeLatexSource } from "../src/tui.js"
 
 const cleanups: Array<() => void> = []
 
@@ -34,6 +34,24 @@ async function setupPlugin(options: Record<string, unknown> = {}) {
 }
 
 describe("TUI renderer registration", () => {
+  test("removes one escape layer from globally double-escaped TeX", () => {
+    const escaped = String.raw`\\begin{aligned}
+I^2 &= \\left(\\int_{-\\infty}^{\\infty} e^{-x^2} dx\\right)^2 \\\\
+&= 2\\pi
+\\end{aligned}`
+    const expected = String.raw`\begin{aligned}
+I^2 &= \left(\int_{-\infty}^{\infty} e^{-x^2} dx\right)^2 \\
+&= 2\pi
+\end{aligned}`
+
+    expect(normalizeLatexSource(escaped)).toBe(expected)
+  })
+
+  test("preserves correctly escaped TeX and its row breaks", () => {
+    const source = String.raw`\begin{aligned} x &= 1 \\ y &= 2 \end{aligned}`
+    expect(normalizeLatexSource(source)).toBe(source)
+  })
+
   test("registers one graphical LaTeX renderer with portable cell fallback", async () => {
     const registered = await setupPlugin({ graphicsMode: "cells", color: "#abcdef" })
 

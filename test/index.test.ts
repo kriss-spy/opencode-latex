@@ -23,5 +23,7 @@ describe("agent formatting instruction", () => {
     expect(instruction).toContain("long, nested, multi-step, or visually awkward")
     expect(instruction).toContain("Do not compromise readability by forcing a long formula into Unicode")
     expect(instruction).toContain("fenced code block labelled latex")
+    expect(instruction).toContain("exactly one backslash")
+    expect(instruction).toContain("exactly two backslashes only for a TeX row break")
   })
 })
