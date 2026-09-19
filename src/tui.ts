@@ -1,11 +1,27 @@
-import { ImageRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
-import { renderLatex } from "./render.js"
+import { GraphicalLatexRenderable } from "./opentui-math.js"
 
-const LANGUAGES = ["latex", "math"] as const
+const LANGUAGE = "latex"
+const GRAPHICS_MODES = ["auto", "kitty", "cells"] as const
+type GraphicsMode = typeof GRAPHICS_MODES[number]
 
 function positiveNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function graphicsMode(value: unknown): GraphicsMode {
+  return typeof value === "string" && GRAPHICS_MODES.includes(value as GraphicsMode)
+    ? value as GraphicsMode
+    : "auto"
+}
+
+export function normalizeLatexSource(source: string): string {
+  return source.replace(/\\+/g, (run, offset: number) => {
+    if (run.length >= 4 && run.length % 2 === 0) return "\\".repeat(run.length / 2)
+    const next = source[offset + run.length]
+    const looksLikeEscapedCommand = next !== undefined && !/\s|&|\\|\[/.test(next)
+    return run.length === 2 && looksLikeEscapedCommand ? "\\" : run
+  })
 }
 
 export default Plugin.define({
@@ -14,27 +30,25 @@ export default Plugin.define({
     const color = typeof context.options.color === "string"
       ? context.options.color
       : context.themeMode === "light" ? "#24292f" : "#d4d4d4"
-    const scale = positiveNumber(context.options.scale, 2)
+    const fontSize = positiveNumber(context.options.fontSize, 20)
     const pixelRatio = positiveNumber(context.options.pixelRatio, 2)
-    const cellWidth = positiveNumber(context.options.cellWidth, 8)
-    const cellHeight = positiveNumber(context.options.cellHeight, 16)
+    const mode = graphicsMode(context.options.graphicsMode)
 
-    const unregisterRenderers = LANGUAGES.map((language) =>
-      context.markdown.registerCodeBlockRenderer(language, (token, render) => {
-        try {
-          const image = renderLatex(token.text, { color, scale, pixelRatio })
-          return new ImageRenderable(context.renderer, {
-            source: image.png,
-            width: Math.max(1, Math.ceil(image.displayWidth / cellWidth)),
-            height: Math.max(1, Math.ceil(image.displayHeight / cellHeight)),
-            fit: "fit",
-          })
-        } catch {
-          return render.defaultRender()
-        }
-      }),
-    )
-
-    return () => unregisterRenderers.forEach((dispose) => dispose())
+    return context.markdown.registerCodeBlockRenderer(LANGUAGE, (token, render) => {
+      try {
+        return new GraphicalLatexRenderable(context.renderer, {
+          content: normalizeLatexSource(token.text),
+          displayMode: true,
+          fallback: "source",
+          foregroundColor: color,
+          graphicsForegroundColor: color,
+          graphicsMode: mode,
+          fontSize,
+          pixelRatio,
+        })
+      } catch {
+        return render.defaultRender()
+      }
+    })
   },
 })
