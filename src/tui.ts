@@ -1,18 +1,18 @@
-import { ImageRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
-import { renderLatex } from "./render.js"
+import { GraphicalLatexRenderable } from "opentui-math/graphics"
 
 const LANGUAGE = "latex"
+const GRAPHICS_MODES = ["auto", "kitty", "cells"] as const
+type GraphicsMode = typeof GRAPHICS_MODES[number]
 
 function positiveNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback
 }
 
-function isDuplicateRenderer(error: unknown, language: string): boolean {
-  const message = typeof error === "object" && error !== null && "message" in error
-    ? String(error.message)
-    : String(error)
-  return message.includes(`Markdown code-block renderer already registered: ${language}`)
+function graphicsMode(value: unknown): GraphicsMode {
+  return typeof value === "string" && GRAPHICS_MODES.includes(value as GraphicsMode)
+    ? value as GraphicsMode
+    : "auto"
 }
 
 export default Plugin.define({
@@ -21,26 +21,25 @@ export default Plugin.define({
     const color = typeof context.options.color === "string"
       ? context.options.color
       : context.themeMode === "light" ? "#24292f" : "#d4d4d4"
-    const scale = positiveNumber(context.options.scale, 2)
-    const cellWidth = positiveNumber(context.options.cellWidth, 8)
-    const cellHeight = positiveNumber(context.options.cellHeight, 16)
+    const fontSize = positiveNumber(context.options.fontSize, 32)
+    const pixelRatio = positiveNumber(context.options.pixelRatio, 1)
+    const mode = graphicsMode(context.options.graphicsMode)
 
-    try {
-      return context.markdown.registerCodeBlockRenderer(LANGUAGE, (token, render) => {
-        try {
-          const image = renderLatex(token.text, { color, scale })
-          return new ImageRenderable(context.renderer, {
-            source: image.png,
-            width: Math.max(1, Math.ceil(image.width / cellWidth)),
-            height: Math.max(1, Math.ceil(image.height / cellHeight)),
-            fit: "fit",
-          })
-        } catch {
-          return render.defaultRender()
-        }
-      })
-    } catch (error) {
-      if (!isDuplicateRenderer(error, LANGUAGE)) throw error
-    }
+    return context.markdown.registerCodeBlockRenderer(LANGUAGE, (token, render) => {
+      try {
+        return new GraphicalLatexRenderable(context.renderer, {
+          content: token.text,
+          displayMode: true,
+          fallback: "source",
+          foregroundColor: color,
+          graphicsForegroundColor: color,
+          graphicsMode: mode,
+          fontSize,
+          pixelRatio,
+        })
+      } catch {
+        return render.defaultRender()
+      }
+    })
   },
 })

@@ -1,8 +1,8 @@
 # opencode-latex
 
-An OpenCode v2 plugin that renders LaTeX in agent messages as terminal images.
+An OpenCode v2 plugin that renders LaTeX in agent messages with [`opentui-math`](https://opentui-math.dev/).
 
-The server plugin asks agents to emit display equations in fenced `latex` blocks. The CLI plugin turns those blocks into PNGs with MathJax and displays them through OpenTUI. If an expression cannot be rendered, OpenCode's normal fenced-code renderer is used instead.
+The server plugin asks agents to emit display equations in fenced `latex` blocks. The CLI plugin renders those blocks as high-resolution MathJax graphics in Kitty-compatible terminals and automatically falls back to selectable Unicode cells everywhere else. If a renderable cannot be created, OpenCode's normal fenced-code renderer is used instead.
 
 ## Install
 
@@ -43,9 +43,9 @@ Options are optional and apply to the CLI renderer:
       "package": "opencode-latex",
       "options": {
         "color": "#d4d4d4",
-        "scale": 2,
-        "cellWidth": 8,
-        "cellHeight": 16
+        "graphicsMode": "auto",
+        "fontSize": 32,
+        "pixelRatio": 1
       }
     }
   ]
@@ -53,8 +53,9 @@ Options are optional and apply to the CLI renderer:
 ```
 
 - `color` sets the equation foreground. It defaults to a light or dark theme-aware value.
-- `scale` controls raster resolution.
-- `cellWidth` and `cellHeight` tune pixel-to-terminal-cell sizing for a terminal font.
+- `graphicsMode` selects `"auto"`, `"kitty"`, or portable `"cells"` rendering.
+- `fontSize` controls the graphical MathJax font size.
+- `pixelRatio` increases graphical raster sharpness without changing the cell footprint.
 
 ## Develop
 
@@ -64,4 +65,4 @@ bun run typecheck
 bun test
 ```
 
-Requires OpenCode v2 and a terminal supported by OpenTUI's image renderer. OpenTUI falls back to block rendering when Kitty or Sixel graphics are unavailable.
+Requires OpenCode v2. High-resolution output is available in Kitty-compatible terminals such as Ghostty, Kitty, and WezTerm; other terminals and multiplexers use the Unicode-cell renderer.
