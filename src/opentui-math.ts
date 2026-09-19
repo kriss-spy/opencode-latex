@@ -70,7 +70,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     super(ctx, options)
     this.graphicsContext = ctx
     this.graphicsMode = options.graphicsMode ?? "auto"
-    this.fontSize = positiveNumber(options.fontSize, 16)
+    this.fontSize = positiveNumber(options.fontSize, 20)
     this.pixelRatio = positiveNumber(options.pixelRatio, 2)
     this.graphicsParseOptions = {
       ...(options.macros ? { macros: options.macros } : {}),

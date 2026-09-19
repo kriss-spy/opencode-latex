@@ -161,21 +161,27 @@ describe("TUI renderer registration", () => {
     expect(destroyed).toBe(handle)
   })
 
-  test("uses a compact graphical font size by default", async () => {
-    const compact = await setupPlugin({}, { kitty_graphics: true })
+  test("uses a readable graphical font size by default", async () => {
+    const standard = await setupPlugin({}, { kitty_graphics: true })
+    const explicitStandard = await setupPlugin({ fontSize: 20 }, { kitty_graphics: true })
     const large = await setupPlugin({ fontSize: 32 }, { kitty_graphics: true })
     const token = { text: String.raw`\int_0^\infty e^{-x^2}\,dx` } as never
     const render = { defaultRender: () => null } as never
-    const compactMath = compact.renderCodeBlock!(token, render) as GraphicalLatexRenderable
+    const standardMath = standard.renderCodeBlock!(token, render) as GraphicalLatexRenderable
+    const explicitStandardMath = explicitStandard.renderCodeBlock!(token, render) as GraphicalLatexRenderable
     const largeMath = large.renderCodeBlock!(token, render) as GraphicalLatexRenderable
-    compact.setup.renderer.root.add(compactMath)
+    standard.setup.renderer.root.add(standardMath)
+    explicitStandard.setup.renderer.root.add(explicitStandardMath)
     large.setup.renderer.root.add(largeMath)
 
-    expect(await compactMath.whenGraphicsReady()).toBe(true)
+    expect(await standardMath.whenGraphicsReady()).toBe(true)
+    expect(await explicitStandardMath.whenGraphicsReady()).toBe(true)
     expect(await largeMath.whenGraphicsReady()).toBe(true)
-    await compact.setup.renderOnce()
+    await standard.setup.renderOnce()
+    await explicitStandard.setup.renderOnce()
     await large.setup.renderOnce()
-    expect(compactMath.height).toBeLessThan(largeMath.height)
+    expect(standardMath.height).toBe(explicitStandardMath.height)
+    expect(standardMath.height).toBeLessThan(largeMath.height)
   })
 
   test("sizes graphics from the terminal's real cell geometry", async () => {

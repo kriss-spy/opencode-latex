@@ -44,7 +44,7 @@ Options are optional and apply to the CLI renderer:
       "options": {
         "color": "#d4d4d4",
         "graphicsMode": "auto",
-        "fontSize": 16,
+        "fontSize": 20,
         "pixelRatio": 2
       }
     }
@@ -54,7 +54,7 @@ Options are optional and apply to the CLI renderer:
 
 - `color` sets the equation foreground. It defaults to a light or dark theme-aware value.
 - `graphicsMode` selects `"auto"`, `"kitty"`, or portable `"cells"` rendering.
-- `fontSize` controls the graphical MathJax font size and defaults to `16`.
+- `fontSize` controls the graphical MathJax font size and defaults to `20`.
 - `pixelRatio` increases graphical raster sharpness without changing the cell footprint.
 
 ## Develop

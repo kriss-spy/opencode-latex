@@ -26,5 +26,7 @@ describe("agent formatting instruction", () => {
     expect(instruction).toContain("exactly one backslash")
     expect(instruction).toContain("exactly two backslashes only for a TeX row break")
     expect(instruction).toContain("Never put \\[...\\] in normal prose")
+    expect(instruction).toContain("Keep every display row compact")
+    expect(instruction).toContain("Never chain several long equalities on one row")
   })
 })

@@ -30,7 +30,7 @@ export default Plugin.define({
     const color = typeof context.options.color === "string"
       ? context.options.color
       : context.themeMode === "light" ? "#24292f" : "#d4d4d4"
-    const fontSize = positiveNumber(context.options.fontSize, 16)
+    const fontSize = positiveNumber(context.options.fontSize, 20)
     const pixelRatio = positiveNumber(context.options.pixelRatio, 2)
     const mode = graphicsMode(context.options.graphicsMode)
 
