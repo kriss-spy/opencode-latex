@@ -16,13 +16,12 @@ function graphicsMode(value: unknown): GraphicsMode {
 }
 
 export function normalizeLatexSource(source: string): string {
-  const commandSlashRuns = source.match(/\\+(?=[A-Za-z]+)/g) ?? []
-  const hasDoubleEscapedCommand = commandSlashRuns.some((run) => run.length > 1)
-  const hasCorrectlyEscapedCommand = commandSlashRuns.some((run) => run.length === 1)
-
-  return hasDoubleEscapedCommand && !hasCorrectlyEscapedCommand
-    ? source.replaceAll("\\\\", "\\")
-    : source
+  return source.replace(/\\+/g, (run, offset: number) => {
+    if (run.length >= 4 && run.length % 2 === 0) return "\\".repeat(run.length / 2)
+    const next = source[offset + run.length]
+    const looksLikeEscapedCommand = next !== undefined && !/\s|&|\\/.test(next)
+    return run.length === 2 && looksLikeEscapedCommand ? "\\" : run
+  })
 }
 
 export default Plugin.define({

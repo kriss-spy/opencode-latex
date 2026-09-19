@@ -49,6 +49,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   private imageColumns = 0
   private imageRows = 0
   private rasterRevision = 0
+  private rasterizing = false
   private renderFailure: Error | undefined
   private pendingRaster: Promise<void> = Promise.resolve()
 
@@ -81,6 +82,8 @@ export class GraphicalLatexRenderable extends LatexRenderable {
 
     this.setupGraphicsMeasureFunction()
     this.graphicsContext.on("capabilities", this.handleCapabilities)
+    this.graphicsContext.on("frame", this.handleFrame)
+    this.graphicsContext.on("resize", this.handleResize)
     this.scheduleRaster()
   }
 
@@ -135,7 +138,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
 
   public get isUsingGraphics(): boolean {
     return this.canUseGraphics() && Boolean(this.image && this.graphicsImage.image) &&
-      !this.latexError && !this.renderFailure
+      !this.renderFailure
   }
 
   public get graphicsError(): Error | undefined {
@@ -205,6 +208,8 @@ export class GraphicalLatexRenderable extends LatexRenderable {
 
   protected override destroySelf(): void {
     this.graphicsContext.off("capabilities", this.handleCapabilities)
+    this.graphicsContext.off("frame", this.handleFrame)
+    this.graphicsContext.off("resize", this.handleResize)
     if (!this.graphicsImage.isDestroyed) this.graphicsImage.destroy()
     super.destroySelf()
   }
@@ -216,15 +221,34 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     this.requestRender()
   }
 
+  private readonly handleFrame = (): void => {
+    if (
+      this.canUseGraphics() &&
+      !this.image &&
+      !this.renderFailure &&
+      !this.rasterizing
+    ) this.scheduleRaster()
+  }
+
+  private readonly handleResize = (): void => {
+    if (this.canUseGraphics()) {
+      if (!this.image && !this.renderFailure && !this.rasterizing) this.scheduleRaster()
+    } else if (this.image || this.rasterizing) this.scheduleRaster()
+    this.yogaNode.markDirty()
+    this.requestRender()
+  }
+
   private scheduleRaster(): void {
     const revision = ++this.rasterRevision
     this.renderFailure = undefined
-    if (!this.canUseGraphics() || this.latexError) {
+    if (!this.canUseGraphics()) {
       this.clearGraphics()
+      this.rasterizing = false
       this.pendingRaster = Promise.resolve()
       return
     }
 
+    this.rasterizing = true
     this.pendingRaster = renderLatexToPng(this.content, {
       displayMode: this.displayMode,
       foregroundColor: this.graphicsColor,
@@ -251,6 +275,9 @@ export class GraphicalLatexRenderable extends LatexRenderable {
         this.clearGraphics()
         this.yogaNode.markDirty()
         this.requestRender()
+      })
+      .finally(() => {
+        if (revision === this.rasterRevision) this.rasterizing = false
       })
   }
 

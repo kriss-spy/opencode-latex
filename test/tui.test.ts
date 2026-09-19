@@ -78,6 +78,27 @@ describe("TUI renderer registration", () => {
     renderable.destroy()
   })
 
+  test("switches to SIXEL when pixel geometry arrives after SIXEL capabilities", async () => {
+    const setup = await createTestRenderer({ width: 40, height: 10 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { sixel: true, kitty_graphics: false })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, { content: "x^2" })
+    setup.renderer.root.add(renderable)
+
+    expect(await renderable.whenGraphicsReady()).toBe(false)
+    expect(renderable.effectiveGraphicsProtocol).toBe("blocks")
+    Object.defineProperty(setup.renderer, "resolution", {
+      configurable: true,
+      value: { width: 400, height: 200 },
+    })
+    await setup.renderOnce()
+
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    expect(renderable.effectiveGraphicsProtocol).toBe("sixel")
+
+    renderable.destroy()
+  })
+
   test("uses OpenTUI's Kitty protocol without writing terminal placements directly", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())
@@ -135,6 +156,33 @@ I^2 &= \left(\int_{-\infty}^{\infty} e^{-x^2} dx\right)^2 \\
   test("preserves correctly escaped TeX and its row breaks", () => {
     const source = String.raw`\begin{aligned} x &= 1 \\ y &= 2 \end{aligned}`
     expect(normalizeLatexSource(source)).toBe(source)
+  })
+
+  test("repairs mixed double-escaped commands without changing row breaks", async () => {
+    const registered = await setupPlugin({}, { sixel: true, kitty_graphics: false })
+    Object.defineProperty(registered.setup.renderer, "resolution", {
+      configurable: true,
+      value: { width: 400, height: 200 },
+    })
+    const source = String.raw`\\begin{aligned}
+I^2 &= \\left(\\int_{-\\infty}^{\\infty} e^{-x^2} dx\\right)^2 \\\\
+&= \int_0^1 1\,dx
+\\end{aligned}`
+    const expected = String.raw`\begin{aligned}
+I^2 &= \left(\int_{-\infty}^{\infty} e^{-x^2} dx\right)^2 \\
+&= \int_0^1 1\,dx
+\end{aligned}`
+
+    const renderable = registered.renderCodeBlock!(
+      { text: source } as never,
+      { defaultRender: () => null } as never,
+    ) as GraphicalLatexRenderable
+    registered.setup.renderer.root.add(renderable)
+
+    expect(renderable.content).toBe(expected)
+    expect(renderable.latexError).toBeDefined()
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    renderable.destroy()
   })
 
   test("registers one graphical LaTeX renderer with portable cell fallback", async () => {
