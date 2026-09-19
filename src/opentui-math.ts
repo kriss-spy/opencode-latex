@@ -49,6 +49,12 @@ interface RuntimeNativeImage {
   readonly height: number
 }
 
+interface PreparedRuntimeImage {
+  readonly image: RuntimeNativeImage
+  readonly pixelWidth: number
+  readonly pixelHeight: number
+}
+
 /**
  * A narrow fork of opentui-math's graphical renderable. MathJax still creates
  * the PNG, while OpenTUI's image buffer owns Kitty/SIXEL transport and cleanup.
@@ -231,23 +237,33 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     const x = originX + Math.floor((this.width - columns) / 2)
     const y = originY + Math.floor((this.height - rows) / 2)
     const protocol = this.requestedImageProtocol()
-    const nativeImage = this.effectiveGraphicsProtocol === "sixel"
-      ? this.ensureSixelRuntimeImage(buffer, x, y, columns, rows)
-      : this.ensureRuntimeImage(buffer)
-    if (!nativeImage) return
+    const prepared = this.effectiveGraphicsProtocol === "sixel"
+      ? this.ensureSixelRuntimeImage(
+          buffer,
+          x,
+          y,
+          columns,
+          rows,
+          pixelWidth,
+          pixelHeight,
+          Math.max(1, Math.round(columns * cellWidth)),
+          Math.max(1, Math.round(rows * cellHeight)),
+        )
+      : prepareRuntimeImage(this.ensureRuntimeImage(buffer), pixelWidth, pixelHeight)
+    if (!prepared) return
 
     buffer.drawImage(
-      nativeImage as never,
+      prepared.image as never,
       x,
       y,
       columns,
       rows,
-      pixelWidth,
-      pixelHeight,
+      prepared.pixelWidth,
+      prepared.pixelHeight,
       0,
       0,
-      nativeImage.width,
-      nativeImage.height,
+      prepared.image.width,
+      prepared.image.height,
       protocol,
     )
   }
@@ -394,38 +410,55 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     y: number,
     columns: number,
     rows: number,
-  ): RuntimeNativeImage | undefined {
+    contentPixelWidth: number,
+    contentPixelHeight: number,
+    cellPixelWidth: number,
+    cellPixelHeight: number,
+  ): PreparedRuntimeImage | undefined {
     const source = this.ensureRuntimeImage(buffer)
     if (!source) return undefined
 
     const backgrounds = readCellBackgrounds(buffer, x, y, columns, rows)
-    if (!backgrounds.some((_, index) => index % 4 === 3 && backgrounds[index]! > 0)) {
-      this.disposeSixelRuntimeImage()
-      return source
-    }
-
-    const backdropKey = `${x}:${y}:${columns}:${rows}:${hashBytes(backgrounds)}`
+    const canvasWidth = Math.max(
+      source.width,
+      Math.ceil(source.width * cellPixelWidth / contentPixelWidth),
+    )
+    const canvasHeight = Math.max(
+      source.height,
+      Math.ceil(source.height * cellPixelHeight / contentPixelHeight),
+    )
+    const backdropKey = [
+      x,
+      y,
+      columns,
+      rows,
+      canvasWidth,
+      canvasHeight,
+      hashBytes(backgrounds),
+    ].join(":")
     if (this.sixelRuntimeImage?.lib === source.lib && this.sixelBackdropKey === backdropKey) {
-      return this.sixelRuntimeImage
+      return prepareRuntimeImage(this.sixelRuntimeImage, cellPixelWidth, cellPixelHeight)
     }
 
     this.disposeSixelRuntimeImage()
-    const pixels = new Uint8Array(source.width * source.height * 4)
-    const copyStatus = source.lib.imageCopyPixels(source.ptr, pixels, source.width * 4, false)
-    if (copyStatus !== 0) return source
+    const pixels = new Uint8Array(canvasWidth * canvasHeight * 4)
+    const copyStatus = source.lib.imageCopyPixels(source.ptr, pixels, canvasWidth * 4, false)
+    if (copyStatus !== 0) return prepareRuntimeImage(source, contentPixelWidth, contentPixelHeight)
 
-    compositeCellBackgrounds(pixels, source.width, source.height, backgrounds, columns, rows)
-    const created = source.lib.imageCreateFromRgba(pixels, source.width, source.height, source.width * 4)
-    if (created.status !== 0 || !created.handle) return source
+    compositeCellBackgrounds(pixels, canvasWidth, canvasHeight, backgrounds, columns, rows)
+    const created = source.lib.imageCreateFromRgba(pixels, canvasWidth, canvasHeight, canvasWidth * 4)
+    if (created.status !== 0 || !created.handle) {
+      return prepareRuntimeImage(source, contentPixelWidth, contentPixelHeight)
+    }
 
     this.sixelRuntimeImage = {
       lib: source.lib,
       ptr: created.handle,
-      width: source.width,
-      height: source.height,
+      width: canvasWidth,
+      height: canvasHeight,
     }
     this.sixelBackdropKey = backdropKey
-    return this.sixelRuntimeImage
+    return prepareRuntimeImage(this.sixelRuntimeImage, cellPixelWidth, cellPixelHeight)
   }
 
   private disposeRuntimeImage(): void {
@@ -442,6 +475,14 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     }
     this.sixelBackdropKey = undefined
   }
+}
+
+function prepareRuntimeImage(
+  image: RuntimeNativeImage | undefined,
+  pixelWidth: number,
+  pixelHeight: number,
+): PreparedRuntimeImage | undefined {
+  return image ? { image, pixelWidth, pixelHeight } : undefined
 }
 
 function readCellBackgrounds(

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.1 - 2026-09-19
+
+- Removes visible right and bottom seams around SIXEL-rendered formulas in embedded xterm.js terminals such as `obsidian-opencode`.
+- Pads SIXEL images to complete terminal-cell boundaries while preserving the formula's pixel scale.
+- Adds regression coverage for sub-cell image dimensions and background compositing.
+
 ## 0.1.0 - 2026-09-19
 
 Initial public release.

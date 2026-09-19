@@ -220,6 +220,72 @@ describe("TUI renderer registration", () => {
     renderable.destroy()
   })
 
+  test("pads SIXEL graphics through the last cell instead of leaving right and bottom seams", async () => {
+    const setup = await createTestRenderer({ width: 40, height: 10 })
+    cleanups.push(() => setup.renderer.destroy())
+    setRendererCapabilities(setup.renderer, { sixel: true, kitty_graphics: false })
+    Object.defineProperty(setup.renderer, "resolution", {
+      configurable: true,
+      value: { width: 400, height: 200 },
+    })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, {
+      content: String.raw`\widehat{f}(\omega)=\int_{-\infty}^{\infty}f(t)e^{-i\omega t}\,dt`,
+      pixelRatio: 2,
+    })
+    setup.renderer.root.add(renderable)
+    expect(await renderable.whenGraphicsReady()).toBe(true)
+    await setup.renderOnce()
+
+    const source = (renderable as unknown as { image: { width: number; height: number } }).image
+    let canvasWidth = 0
+    let canvasHeight = 0
+    let placement: { columns: number; rows: number; pixelWidth: number; pixelHeight: number } | undefined
+    const background = new Uint16Array(40 * 10 * 4)
+    background.fill(0xff)
+    const fakeBuffer = {
+      width: 40,
+      height: 10,
+      buffers: { bg: background },
+      lib: {
+        imageDecode() {
+          return { status: 0, handle: {} }
+        },
+        imageCopyPixels() {
+          return 0
+        },
+        imageCreateFromRgba(_pixels: Uint8Array, width: number, height: number) {
+          canvasWidth = width
+          canvasHeight = height
+          return { status: 0, handle: {} }
+        },
+        imageDestroy() {},
+      },
+      drawImage(
+        _image: unknown,
+        _x: number,
+        _y: number,
+        columns: number,
+        rows: number,
+        pixelWidth: number,
+        pixelHeight: number,
+      ) {
+        placement = { columns, rows, pixelWidth, pixelHeight }
+        return true
+      },
+    }
+
+    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
+      .renderGraphics(fakeBuffer)
+
+    expect(placement).toBeDefined()
+    expect(placement!.pixelWidth).toBe(placement!.columns * 10)
+    expect(placement!.pixelHeight).toBe(placement!.rows * 20)
+    expect(canvasWidth).toBeGreaterThanOrEqual(source.width)
+    expect(canvasHeight).toBeGreaterThanOrEqual(source.height)
+    expect(canvasWidth > source.width || canvasHeight > source.height).toBe(true)
+    renderable.destroy()
+  })
+
   test("keeps transparent source pixels for Kitty graphics", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())

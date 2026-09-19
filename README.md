@@ -23,7 +23,7 @@ Graphical output uses Kitty graphics in terminals such as Ghostty and Kitty, or 
 Install the package globally through OpenCode:
 
 ```sh
-opencode plugin add opencode-latex@0.1.0
+opencode plugin add opencode-latex@0.1.1
 ```
 
 Alternatively, add it to `opencode.jsonc`:
@@ -31,7 +31,7 @@ Alternatively, add it to `opencode.jsonc`:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-latex@0.1.0"]
+  "plugins": ["opencode-latex@0.1.1"]
 }
 ```
 
@@ -80,7 +80,7 @@ Options are optional:
 {
   "plugins": [
     {
-      "package": "opencode-latex@0.1.0",
+      "package": "opencode-latex@0.1.1",
       "options": {
         "color": "#d4d4d4",
         "graphicsMode": "auto",
