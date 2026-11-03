@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test"
 import plugin from "../src/index.js"
 
 describe("agent formatting instruction", () => {
+  test("does not claim OpenCode's built-in LaTeX plugin ID", () => {
+    expect(plugin.id).toBe("io.github.kriss-spy.opencode-latex")
+  })
   test("reserves Unicode for short inline math and renders long formulas", async () => {
     let applyContext: ((event: { system: Array<{ type: string; text: string }> }) => void) | undefined
 

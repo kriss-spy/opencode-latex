@@ -15,7 +15,7 @@ Keep every display row compact so it remains readable in a narrow terminal. Spli
 Never put \\[...\\] in normal prose; OpenCode will show it as raw text. Do not wrap fenced expressions in dollar signs or \\[...\\]. If an inline expression cannot be written clearly with a few Unicode symbols, render it as a latex block instead.`
 
 export default Plugin.define({
-  id: "opencode.latex",
+  id: "io.github.kriss-spy.opencode-latex",
   async setup(context) {
     await context.session.hook("context", (event) => {
       event.system.push({ type: "text", text: LATEX_INSTRUCTION })

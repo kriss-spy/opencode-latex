@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { MarkdownCodeBlockRenderer } from "@opentui/core"
+import { NativeImage, MarkdownRenderable, SyntaxStyle, TextRenderable, createMarkdownCodeBlockRenderer, type MarkdownCodeBlockRenderer } from "@opentui/core"
 import { createTestRenderer, setRendererCapabilities } from "@opentui/core/testing"
 import plugin, { normalizeLatexSource } from "../src/tui.js"
 import { GraphicalLatexRenderable } from "../src/opentui-math.js"
@@ -89,6 +89,41 @@ async function setupPlugin(
 }
 
 describe("TUI renderer registration", () => {
+  test("coexists with built-in latex and math contributions under the host's last-wins rule", async () => {
+    const registered = await setupPlugin({ graphicsMode: "cells" })
+    expect(plugin.id).toBe("io.github.kriss-spy.opencode-latex.tui")
+    const builtin: MarkdownCodeBlockRenderer = () => new TextRenderable(registered.setup.renderer, {
+      content: "Built-in math", height: 1,
+    })
+    // OpenCode 2.2.2 packages/tui/src/plugin/markdown.ts folds registrations
+    // in this order. Duplicate checks apply within each plugin, not globally.
+    const contributions = [{ latex: builtin, math: builtin }, { latex: registered.renderCodeBlock! }]
+    const markdown = new MarkdownRenderable(registered.setup.renderer, {
+      syntaxStyle: SyntaxStyle.fromStyles({}, registered.setup.renderer.nativeScene),
+      renderNode: createMarkdownCodeBlockRenderer(Object.assign({}, ...contributions)),
+      content: "```latex\n\\frac{1}{2}\n```\n\n```math\nx^2\n```",
+    })
+    registered.setup.renderer.root.add(markdown)
+    await registered.setup.renderOnce()
+    const frame = registered.setup.captureCharFrame()
+    expect(frame).toContain("─")
+    expect(frame).toContain("Built-in math")
+  })
+
+  test("imports with the newer host's Unicode registry metadata", () => {
+    const result = Bun.spawnSync([process.execPath, "--eval", `
+      globalThis[Symbol.for("@opentui/core/singleton")] = {
+        "env-registry": { OPENTUI_FORCE_UNICODE: {
+          name: "OPENTUI_FORCE_UNICODE",
+          description: "Use the Unicode width method (mode 2027) when the variable is present",
+          type: "string", required: false,
+        } },
+      };
+      await import(${JSON.stringify(new URL("../src/tui.ts", import.meta.url).href)});
+    `])
+    expect(result.stderr.toString()).toBe("")
+    expect(result.exitCode).toBe(0)
+  })
   test("uses SIXEL graphics when the terminal advertises SIXEL with pixel geometry", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())
@@ -174,7 +209,7 @@ describe("TUI renderer registration", () => {
     renderable.destroy()
   })
 
-  test("decodes graphics with the host buffer's OpenTUI runtime", async () => {
+  test("uses a host-owned native image and disposes it on destruction", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())
     setRendererCapabilities(setup.renderer, { kitty_graphics: true })
@@ -182,198 +217,69 @@ describe("TUI renderer registration", () => {
     setup.renderer.root.add(renderable)
     expect(await renderable.whenGraphicsReady()).toBe(true)
     await setup.renderOnce()
-
-    const handle = {}
-    let decodeCount = 0
-    let destroyed: unknown
-    let drawnImage: { ptr: unknown } | undefined
-    const fakeBuffer = {
-      lib: {
-        imageDecode() {
-          decodeCount++
-          return { status: 0, handle }
-        },
-        imageDestroy(value: unknown) {
-          destroyed = value
-        },
-      },
-      drawImage(image: { ptr: unknown }) {
-        drawnImage = image
-        return true
-      },
-    }
-
-    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
-      .renderGraphics(fakeBuffer)
-    expect(decodeCount).toBe(1)
-    expect(drawnImage?.ptr).toBe(handle)
-
+    let drawn: NativeImage | undefined
+    const draw = () => (renderable as unknown as { renderGraphics(buffer: unknown): void }).renderGraphics({
+      drawImage(image: NativeImage) { drawn = image; return true },
+    })
+    draw()
+    expect(drawn).toBeInstanceOf(NativeImage)
+    const first = drawn!
+    expect(first.width).toBeGreaterThan(0)
+    draw()
+    expect(drawn).toBe(first)
     renderable.destroy()
-    expect(destroyed).toBe(handle)
+    expect(() => first.raw()).toThrow()
   })
 
-  test("composites SIXEL transparency over the actual cell background", async () => {
+  test("reuses padded SIXEL images across scrolling and preserves transparency", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())
     setRendererCapabilities(setup.renderer, { sixel: true, kitty_graphics: false })
     Object.defineProperty(setup.renderer, "resolution", {
-      configurable: true,
-      value: { width: 400, height: 200 },
+      configurable: true, value: { width: 400, height: 200 },
     })
-    const renderable = new GraphicalLatexRenderable(setup.renderer, {
-      content: "x",
-      pixelRatio: 1,
-    })
+    const renderable = new GraphicalLatexRenderable(setup.renderer, { content: String.raw`\frac{1}{2}` })
     setup.renderer.root.add(renderable)
     expect(await renderable.whenGraphicsReady()).toBe(true)
+    // Native recording buffers do not expose raw background planes.
+    // Rendering must succeed using the public image API alone.
     await setup.renderOnce()
-
-    const decodedHandle = { kind: "decoded" }
-    const compositedHandle = { kind: "composited" }
-    let compositedPixels: Uint8Array | undefined
-    let drawnHandle: unknown
-    const background = new Uint16Array(40 * 10 * 4)
-    for (let index = 0; index < 40 * 10; index++) {
-      background[index * 4] = 0x22
-      background[index * 4 + 1] = 0x33
-      background[index * 4 + 2] = 0x44
-      background[index * 4 + 3] = 0xff
-    }
-    const fakeBuffer = {
-      width: 40,
-      height: 10,
-      buffers: { bg: background },
-      lib: {
-        imageDecode() {
-          return { status: 0, handle: decodedHandle }
-        },
-        imageCopyPixels(_handle: unknown, destination: Uint8Array) {
-          destination.fill(0)
-          return 0
-        },
-        imageCreateFromRgba(pixels: Uint8Array) {
-          compositedPixels = pixels.slice()
-          return { status: 0, handle: compositedHandle }
-        },
-        imageDestroy() {},
-      },
-      drawImage(image: { ptr: unknown }) {
-        drawnHandle = image.ptr
+    const placements: Array<{ image: NativeImage; columns: number; rows: number; width: number; height: number }> = []
+    const buffer = {
+      get buffers(): never { throw new Error("raw paint-buffer access") },
+      drawImage(image: NativeImage, _x: number, _y: number, columns: number, rows: number, width: number, height: number) {
+        placements.push({ image, columns, rows, width, height })
         return true
       },
     }
-
-    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
-      .renderGraphics(fakeBuffer)
-
-    expect(drawnHandle).toBe(compositedHandle)
-    expect(compositedPixels?.slice(0, 4)).toEqual(Uint8Array.of(0x22, 0x33, 0x44, 0xff))
-    renderable.destroy()
-  })
-
-  test("pads SIXEL graphics through the last cell instead of leaving right and bottom seams", async () => {
-    const setup = await createTestRenderer({ width: 40, height: 10 })
-    cleanups.push(() => setup.renderer.destroy())
-    setRendererCapabilities(setup.renderer, { sixel: true, kitty_graphics: false })
-    Object.defineProperty(setup.renderer, "resolution", {
-      configurable: true,
-      value: { width: 400, height: 200 },
-    })
-    const renderable = new GraphicalLatexRenderable(setup.renderer, {
-      content: String.raw`\widehat{f}(\omega)=\int_{-\infty}^{\infty}f(t)e^{-i\omega t}\,dt`,
-      pixelRatio: 2,
-    })
-    setup.renderer.root.add(renderable)
-    expect(await renderable.whenGraphicsReady()).toBe(true)
+    const draw = () => (renderable as unknown as { renderGraphics(buffer: unknown): void }).renderGraphics(buffer)
+    draw()
+    const first = placements.at(-1)!
+    expect(first.width).toBe(first.columns * 10)
+    expect(first.height).toBe(first.rows * 20)
+    const pixels = first.image.raw()
+    expect(pixels.data.at(-1)).toBe(0)
+    renderable.y = 1
     await setup.renderOnce()
-
-    const source = (renderable as unknown as { image: { width: number; height: number } }).image
-    let canvasWidth = 0
-    let canvasHeight = 0
-    let placement: { columns: number; rows: number; pixelWidth: number; pixelHeight: number } | undefined
-    const background = new Uint16Array(40 * 10 * 4)
-    background.fill(0xff)
-    const fakeBuffer = {
-      width: 40,
-      height: 10,
-      buffers: { bg: background },
-      lib: {
-        imageDecode() {
-          return { status: 0, handle: {} }
-        },
-        imageCopyPixels() {
-          return 0
-        },
-        imageCreateFromRgba(_pixels: Uint8Array, width: number, height: number) {
-          canvasWidth = width
-          canvasHeight = height
-          return { status: 0, handle: {} }
-        },
-        imageDestroy() {},
-      },
-      drawImage(
-        _image: unknown,
-        _x: number,
-        _y: number,
-        columns: number,
-        rows: number,
-        pixelWidth: number,
-        pixelHeight: number,
-      ) {
-        placement = { columns, rows, pixelWidth, pixelHeight }
-        return true
-      },
-    }
-
-    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
-      .renderGraphics(fakeBuffer)
-
-    expect(placement).toBeDefined()
-    expect(placement!.pixelWidth).toBe(placement!.columns * 10)
-    expect(placement!.pixelHeight).toBe(placement!.rows * 20)
-    expect(canvasWidth).toBeGreaterThanOrEqual(source.width)
-    expect(canvasHeight).toBeGreaterThanOrEqual(source.height)
-    expect(canvasWidth > source.width || canvasHeight > source.height).toBe(true)
+    draw()
+    expect(placements.at(-1)!.image).toBe(first.image)
     renderable.destroy()
+    expect(() => first.image.raw()).toThrow()
   })
 
   test("keeps transparent source pixels for Kitty graphics", async () => {
     const setup = await createTestRenderer({ width: 40, height: 10 })
     cleanups.push(() => setup.renderer.destroy())
-    setRendererCapabilities(setup.renderer, { kitty_graphics: true, sixel: false })
+    setRendererCapabilities(setup.renderer, { kitty_graphics: true })
     const renderable = new GraphicalLatexRenderable(setup.renderer, { content: "x" })
     setup.renderer.root.add(renderable)
     expect(await renderable.whenGraphicsReady()).toBe(true)
     await setup.renderOnce()
-
-    const decodedHandle = {}
-    let createCount = 0
-    let drawnHandle: unknown
-    const fakeBuffer = {
-      width: 40,
-      height: 10,
-      buffers: { bg: new Uint16Array(40 * 10 * 4).fill(0xff) },
-      lib: {
-        imageDecode() {
-          return { status: 0, handle: decodedHandle }
-        },
-        imageCreateFromRgba() {
-          createCount++
-          return { status: 0, handle: {} }
-        },
-        imageDestroy() {},
-      },
-      drawImage(image: { ptr: unknown }) {
-        drawnHandle = image.ptr
-        return true
-      },
-    }
-
-    ;(renderable as unknown as { renderGraphics(buffer: unknown): void })
-      .renderGraphics(fakeBuffer)
-
-    expect(createCount).toBe(0)
-    expect(drawnHandle).toBe(decodedHandle)
+    let pixels: Uint8Array | undefined
+    ;(renderable as unknown as { renderGraphics(buffer: unknown): void }).renderGraphics({
+      drawImage(image: NativeImage) { pixels = image.raw().data; return true },
+    })
+    expect(pixels!.some((value, index) => index % 4 === 3 && value === 0)).toBe(true)
     renderable.destroy()
   })
 
@@ -431,7 +337,7 @@ describe("TUI renderer registration", () => {
       value: { width: 1200, height: 800 },
     })
     const placements: Array<{ pixelWidth: number; pixelHeight: number; sourceWidth: number; sourceHeight: number }> = []
-    const buffer = setup.renderer.nextRenderBuffer
+    const buffer = { }
     Object.defineProperty(buffer, "drawImage", {
       configurable: true,
       value: (
@@ -467,6 +373,9 @@ describe("TUI renderer registration", () => {
     expect(await single.whenGraphicsReady()).toBe(true)
     expect(await multiline.whenGraphicsReady()).toBe(true)
     await setup.renderOnce()
+    for (const renderable of [single, multiline]) {
+      ;(renderable as unknown as { renderGraphics(buffer: unknown): void }).renderGraphics(buffer)
+    }
     expect(placements).toHaveLength(2)
     const widthScale = placements[0]!.pixelWidth / placements[0]!.sourceWidth
     const heightScale = placements[0]!.pixelHeight / placements[0]!.sourceHeight
@@ -489,7 +398,8 @@ describe("TUI renderer registration", () => {
       get: () => resolution,
     })
     const placements: Array<{ pixelWidth: number; pixelHeight: number }> = []
-    Object.defineProperty(setup.renderer.nextRenderBuffer, "drawImage", {
+    const buffer = {}
+    Object.defineProperty(buffer, "drawImage", {
       configurable: true,
       value: (
         _image: unknown,
@@ -512,11 +422,13 @@ describe("TUI renderer registration", () => {
     setup.renderer.root.add(renderable)
     expect(await renderable.whenGraphicsReady()).toBe(true)
     await setup.renderOnce()
+    ;(renderable as unknown as { renderGraphics(buffer: unknown): void }).renderGraphics(buffer)
     const normal = placements.at(-1)!
 
     resolution = { width: 2400, height: 1600 }
     setup.renderer.emit("resize", setup.renderer.terminalWidth, setup.renderer.terminalHeight)
     await setup.renderOnce()
+    ;(renderable as unknown as { renderGraphics(buffer: unknown): void }).renderGraphics(buffer)
     const zoomed = placements.at(-1)!
 
     expect(zoomed.pixelWidth / normal.pixelWidth).toBeCloseTo(2, 1)

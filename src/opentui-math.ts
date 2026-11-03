@@ -1,12 +1,13 @@
 import {
   ImageRenderable,
+  NativeImage,
   type ColorInput,
   type ImageRenderProtocol,
   type OptimizedBuffer,
   type RGBA,
   type RenderContext,
 } from "@opentui/core"
-import { MeasureMode } from "@opentui/core/yoga"
+import { MeasureMode, type MeasureFunction } from "@opentui/core/yoga"
 import { LatexRenderable, type LatexRenderableOptions } from "opentui-math"
 import { renderLatexToPng, type RenderedMathImage } from "opentui-math/graphics"
 
@@ -25,32 +26,8 @@ export interface GraphicalLatexRenderableOptions extends LatexRenderableOptions 
 const DEFAULT_CELL_WIDTH = 8
 const DEFAULT_CELL_HEIGHT = 16
 
-interface RuntimeImageLibrary {
-  imageDecode(data: Uint8Array): { status: number; handle: unknown | null }
-  imageCopyPixels(
-    handle: unknown,
-    destination: Uint8Array,
-    stride: number,
-    bgra: boolean,
-  ): number
-  imageCreateFromRgba(
-    pixels: Uint8Array,
-    width: number,
-    height: number,
-    stride: number,
-  ): { status: number; handle: unknown | null }
-  imageDestroy(handle: unknown): void
-}
-
-interface RuntimeNativeImage {
-  readonly lib: RuntimeImageLibrary
-  readonly ptr: unknown
-  readonly width: number
-  readonly height: number
-}
-
 interface PreparedRuntimeImage {
-  readonly image: RuntimeNativeImage
+  readonly image: NativeImage
   readonly pixelWidth: number
   readonly pixelHeight: number
 }
@@ -60,6 +37,14 @@ interface PreparedRuntimeImage {
  * the PNG, while OpenTUI's image buffer owns Kitty/SIXEL transport and cleanup.
  */
 export class GraphicalLatexRenderable extends LatexRenderable {
+  // opentui-math 0.1.0 still calls the removed Yoga node API, including during
+  // super(). Adapt only this instance to the host's public measurement API.
+  protected get yogaNode() {
+    return {
+      markDirty: () => this.invalidateIntrinsicSize(),
+      setMeasureFunc: (measure: MeasureFunction) => this.setMeasureProvider(measure),
+    }
+  }
   private readonly graphicsContext: RenderContext
   private readonly graphicsMode: GraphicsMode
   private readonly fontSize: number
@@ -76,9 +61,9 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   private graphicsColorFollowsForeground: boolean
   private graphicsColor: string
   private image: RenderedMathImage | undefined
-  private runtimeImage: RuntimeNativeImage | undefined
-  private sixelRuntimeImage: RuntimeNativeImage | undefined
-  private sixelBackdropKey: string | undefined
+  private runtimeImage: NativeImage | undefined
+  private sixelRuntimeImage: NativeImage | undefined
+  private sixelSizeKey: string | undefined
   private imageColumns = 0
   private imageRows = 0
   private rasterRevision = 0
@@ -239,17 +224,12 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     const protocol = this.requestedImageProtocol()
     const prepared = this.effectiveGraphicsProtocol === "sixel"
       ? this.ensureSixelRuntimeImage(
-          buffer,
-          x,
-          y,
-          columns,
-          rows,
           pixelWidth,
           pixelHeight,
           Math.max(1, Math.round(columns * cellWidth)),
           Math.max(1, Math.round(rows * cellHeight)),
         )
-      : prepareRuntimeImage(this.ensureRuntimeImage(buffer), pixelWidth, pixelHeight)
+      : prepareRuntimeImage(this.ensureRuntimeImage(), pixelWidth, pixelHeight)
     if (!prepared) return
 
     buffer.drawImage(
@@ -281,7 +261,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     this.graphicsImage.protocol = this.requestedImageProtocol()
     this.scheduleRaster()
     this.updateImageCellSize()
-    this.yogaNode.markDirty()
+    this.invalidateIntrinsicSize()
     this.requestRender()
   }
 
@@ -299,7 +279,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
       if (!this.image && !this.renderFailure && !this.rasterizing) this.scheduleRaster()
     } else if (this.image || this.rasterizing) this.scheduleRaster()
     this.updateImageCellSize()
-    this.yogaNode.markDirty()
+    this.invalidateIntrinsicSize()
     this.requestRender()
   }
 
@@ -328,14 +308,14 @@ export class GraphicalLatexRenderable extends LatexRenderable {
         this.image = image
         this.updateImageCellSize()
         this.graphicsImage.protocol = this.requestedImageProtocol()
-        this.yogaNode.markDirty()
+        this.invalidateIntrinsicSize()
         this.requestRender()
       })
       .catch((error) => {
         if (revision !== this.rasterRevision || this.isDestroyed) return
         this.renderFailure = error instanceof Error ? error : new Error(String(error))
         this.clearGraphics()
-        this.yogaNode.markDirty()
+        this.invalidateIntrinsicSize()
         this.requestRender()
       })
       .finally(() => {
@@ -371,7 +351,7 @@ export class GraphicalLatexRenderable extends LatexRenderable {
   }
 
   private setupGraphicsMeasureFunction(): void {
-    this.yogaNode.setMeasureFunc((width, widthMode, height, heightMode) => {
+    this.setMeasureProvider((width, widthMode, height, heightMode) => {
       const intrinsicWidth = this.isUsingGraphics ? this.imageColumns : this.intrinsicWidth
       const intrinsicHeight = this.isUsingGraphics ? this.imageRows : this.intrinsicHeight
       return {
@@ -381,175 +361,65 @@ export class GraphicalLatexRenderable extends LatexRenderable {
     })
   }
 
-  private ensureRuntimeImage(buffer: OptimizedBuffer): RuntimeNativeImage | undefined {
+  private ensureRuntimeImage(): NativeImage | undefined {
     if (!this.image) return undefined
-    // TUI plugins can resolve a separate @opentui/core module. Decode through
-    // the target buffer's native library so its image handle is valid there.
-    const lib = (buffer as unknown as { lib: RuntimeImageLibrary }).lib
-    if (this.runtimeImage?.lib === lib) return this.runtimeImage
-    this.disposeRuntimeImage()
-
-    const decoded = lib.imageDecode(this.image.png)
-    if (decoded.status !== 0 || !decoded.handle) {
-      this.renderFailure = new Error(`OpenTUI image decode failed with status ${decoded.status}`)
+    if (this.runtimeImage) return this.runtimeImage
+    try {
+      this.runtimeImage = NativeImage.decode(this.image.png, {
+        owner: this.graphicsContext.nativeScene.resourceContext,
+      })
+      return this.runtimeImage
+    } catch (error) {
+      this.renderFailure = error instanceof Error ? error : new Error(String(error))
+      this.invalidateIntrinsicSize()
       this.requestRender()
       return undefined
     }
-    this.runtimeImage = {
-      lib,
-      ptr: decoded.handle,
-      width: this.image.width,
-      height: this.image.height,
-    }
-    return this.runtimeImage
   }
 
   private ensureSixelRuntimeImage(
-    buffer: OptimizedBuffer,
-    x: number,
-    y: number,
-    columns: number,
-    rows: number,
     contentPixelWidth: number,
     contentPixelHeight: number,
     cellPixelWidth: number,
     cellPixelHeight: number,
   ): PreparedRuntimeImage | undefined {
-    const source = this.ensureRuntimeImage(buffer)
+    const source = this.ensureRuntimeImage()
     if (!source) return undefined
-
-    const backgrounds = readCellBackgrounds(buffer, x, y, columns, rows)
-    const canvasWidth = Math.max(
-      source.width,
-      Math.ceil(source.width * cellPixelWidth / contentPixelWidth),
-    )
-    const canvasHeight = Math.max(
-      source.height,
-      Math.ceil(source.height * cellPixelHeight / contentPixelHeight),
-    )
-    const backdropKey = [
-      x,
-      y,
-      columns,
-      rows,
-      canvasWidth,
-      canvasHeight,
-      hashBytes(backgrounds),
-    ].join(":")
-    if (this.sixelRuntimeImage?.lib === source.lib && this.sixelBackdropKey === backdropKey) {
-      return prepareRuntimeImage(this.sixelRuntimeImage, cellPixelWidth, cellPixelHeight)
+    const canvasWidth = Math.max(source.width, Math.ceil(source.width * cellPixelWidth / contentPixelWidth))
+    const canvasHeight = Math.max(source.height, Math.ceil(source.height * cellPixelHeight / contentPixelHeight))
+    const sizeKey = `${canvasWidth}:${canvasHeight}`
+    if (!this.sixelRuntimeImage || this.sixelSizeKey !== sizeKey) {
+      this.disposeSixelRuntimeImage()
+      // Keep full terminal-cell coverage. Core handles transparent
+      // padding during native SIXEL encoding.
+      this.sixelRuntimeImage = source.extend({
+        right: canvasWidth - source.width,
+        bottom: canvasHeight - source.height,
+      })
+      this.sixelSizeKey = sizeKey
     }
-
-    this.disposeSixelRuntimeImage()
-    const pixels = new Uint8Array(canvasWidth * canvasHeight * 4)
-    const copyStatus = source.lib.imageCopyPixels(source.ptr, pixels, canvasWidth * 4, false)
-    if (copyStatus !== 0) return prepareRuntimeImage(source, contentPixelWidth, contentPixelHeight)
-
-    compositeCellBackgrounds(pixels, canvasWidth, canvasHeight, backgrounds, columns, rows)
-    const created = source.lib.imageCreateFromRgba(pixels, canvasWidth, canvasHeight, canvasWidth * 4)
-    if (created.status !== 0 || !created.handle) {
-      return prepareRuntimeImage(source, contentPixelWidth, contentPixelHeight)
-    }
-
-    this.sixelRuntimeImage = {
-      lib: source.lib,
-      ptr: created.handle,
-      width: canvasWidth,
-      height: canvasHeight,
-    }
-    this.sixelBackdropKey = backdropKey
     return prepareRuntimeImage(this.sixelRuntimeImage, cellPixelWidth, cellPixelHeight)
   }
 
   private disposeRuntimeImage(): void {
     this.disposeSixelRuntimeImage()
-    if (!this.runtimeImage) return
-    this.runtimeImage.lib.imageDestroy(this.runtimeImage.ptr)
+    this.runtimeImage?.dispose()
     this.runtimeImage = undefined
   }
 
   private disposeSixelRuntimeImage(): void {
-    if (this.sixelRuntimeImage) {
-      this.sixelRuntimeImage.lib.imageDestroy(this.sixelRuntimeImage.ptr)
-      this.sixelRuntimeImage = undefined
-    }
-    this.sixelBackdropKey = undefined
+    this.sixelRuntimeImage?.dispose()
+    this.sixelRuntimeImage = undefined
+    this.sixelSizeKey = undefined
   }
 }
 
 function prepareRuntimeImage(
-  image: RuntimeNativeImage | undefined,
+  image: NativeImage | undefined,
   pixelWidth: number,
   pixelHeight: number,
 ): PreparedRuntimeImage | undefined {
   return image ? { image, pixelWidth, pixelHeight } : undefined
-}
-
-function readCellBackgrounds(
-  buffer: OptimizedBuffer,
-  x: number,
-  y: number,
-  columns: number,
-  rows: number,
-): Uint8Array {
-  const result = new Uint8Array(columns * rows * 4)
-  const source = buffer.buffers.bg
-  for (let row = 0; row < rows; row++) {
-    for (let column = 0; column < columns; column++) {
-      const sourceX = x + column
-      const sourceY = y + row
-      if (sourceX < 0 || sourceY < 0 || sourceX >= buffer.width || sourceY >= buffer.height) continue
-      const sourceOffset = (sourceY * buffer.width + sourceX) * 4
-      const targetOffset = (row * columns + column) * 4
-      result[targetOffset] = source[sourceOffset]! & 0xff
-      result[targetOffset + 1] = source[sourceOffset + 1]! & 0xff
-      result[targetOffset + 2] = source[sourceOffset + 2]! & 0xff
-      result[targetOffset + 3] = source[sourceOffset + 3]! & 0xff
-    }
-  }
-  return result
-}
-
-function compositeCellBackgrounds(
-  pixels: Uint8Array,
-  width: number,
-  height: number,
-  backgrounds: Uint8Array,
-  columns: number,
-  rows: number,
-): void {
-  for (let py = 0; py < height; py++) {
-    const cellY = Math.min(rows - 1, Math.floor(py * rows / height))
-    for (let px = 0; px < width; px++) {
-      const cellX = Math.min(columns - 1, Math.floor(px * columns / width))
-      const pixelOffset = (py * width + px) * 4
-      const backgroundOffset = (cellY * columns + cellX) * 4
-      const sourceAlpha = pixels[pixelOffset + 3]!
-      const backgroundAlpha = backgrounds[backgroundOffset + 3]!
-      if (backgroundAlpha === 0) continue
-
-      const inverseSourceAlpha = 255 - sourceAlpha
-      const outputAlphaScaled = sourceAlpha * 255 + backgroundAlpha * inverseSourceAlpha
-      for (let channel = 0; channel < 3; channel++) {
-        const source = pixels[pixelOffset + channel]!
-        const background = backgrounds[backgroundOffset + channel]!
-        pixels[pixelOffset + channel] = Math.round(
-          (source * sourceAlpha * 255 + background * backgroundAlpha * inverseSourceAlpha) /
-          outputAlphaScaled,
-        )
-      }
-      pixels[pixelOffset + 3] = Math.round(outputAlphaScaled / 255)
-    }
-  }
-}
-
-function hashBytes(bytes: Uint8Array): number {
-  let hash = 0x811c9dc5
-  for (const byte of bytes) {
-    hash ^= byte
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return hash >>> 0
 }
 
 function constrainedSize(intrinsic: number, available: number, mode: MeasureMode): number {

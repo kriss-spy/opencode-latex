@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.1 - 2026-11-03
+
+- Uses `io.github.kriss-spy.opencode-latex` and `io.github.kriss-spy.opencode-latex.tui` IDs to avoid OpenCode's built-in `opencode.latex` ID.
+- Targets OpenCode 2.2.2 and Core 0.7.x. Uses the host's per-plugin renderer registration so graphical `latex` and built-in `math` coexist.
+- Replaces the Core `<0.6.0` cap with Core 0.7.x compatibility. Adapts `opentui-math` measurement to the public host API.
+- Uses host-owned `NativeImage` resources instead of private image-library handles and raw paint-buffer access.
+- Reuses padded SIXEL images across position changes. Native OpenTUI handles SIXEL transparency and encoding; this replaces JavaScript background compositing.
+- Documents the built-in Unicode renderer, version requirements, troubleshooting, and the one-time render-mode preference reset.
+- Includes the existing README demo images in the npm package.
+
 ## 0.2.0 - 2026-09-19
 
 - Adds a **LaTeX: Set default render mode** command to the command palette and `/latex-render-mode` slash command.

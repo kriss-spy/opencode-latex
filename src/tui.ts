@@ -67,7 +67,7 @@ export function normalizeLatexSource(source: string): string {
 }
 
 export default Plugin.define({
-  id: "opencode.latex.tui",
+  id: "io.github.kriss-spy.opencode-latex.tui",
   setup(context) {
     const color = typeof context.options.color === "string"
       ? context.options.color
@@ -85,7 +85,7 @@ export default Plugin.define({
       mode: "global",
       commands: [
         {
-          id: "opencode.latex.render-mode",
+          id: "io.github.kriss-spy.opencode-latex.render-mode",
           title: "Set default render mode",
           description: "Choose how LaTeX formulas are rendered",
           group: "LaTeX",
